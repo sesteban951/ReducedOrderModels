@@ -60,9 +60,31 @@ plot(Pre_S_S);
 legend(["$S$", "$Pre(S)$", "$Pre(S) \cap S$"], 'interpreter', 'latex');
 
 % ---------------------- Forwards Reachability -----------------------------
+
 X0 = con2vert(H_x, h_x);
 k = convhull(X0);
 X0 = X0(k,:);
+X0 = remove_redundant(X0);
+
+% (A o X) = conv(AV)
+AX = X0 * A'
+
+% (B o U) = conv(BU)
+U = [-5; 5];
+BU = U * B';
+
+% minkowsli sum of AX and BU
+AX_sum_BU = [AX + ones(size(AX,1),1) * BU(1,:);
+             AX + ones(size(AX,1),1) * BU(2,:)];
+k = convhull(AX_sum_BU);
+AX_sum_BU = AX_sum_BU(k,:);
+AX_sum_BU = polyshape(AX_sum_BU);
+
+% plot 2D polytopes in Xcal
+figure(); grid on; axis equal; hold on;
+plot(get_polyshape(H_x, h_x));
+plot(AX_sum_BU);
+legend(["$\mathcal{X}_0$", "$Succ(\mathcal{X}_0)$"], 'interpreter', 'latex');
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
