@@ -31,8 +31,8 @@ h_u = [5; 5];
 
 % compute Pre(S) x U
 H = [H_s * A,    H_s * B;
-     zeros(2,2), H_u];
-h = [h_s; h_u];
+     zeros(2,2), H_u]
+h = [h_s; h_u]
 Pre_S_V = con2vert(H, h);
 
 % plot 3D polytope in Scal x Ucal
@@ -83,9 +83,9 @@ d = [h_; h_u];
 V = con2vert(C, d);
 V = V(:,1:2);
 V = V(convhull(V),:);
-plot(V(:,1), V(:,2), 'k', 'LineWidth', 2);
+plot(V(:,1), V(:,2), 'm', 'LineWidth', 2);
 
-legend(["$\mathcal{S}$", "$\mathcal{B}_1(S)$", "$\mathcal{B}_2(S)$", "$\mathcal{B}_3(S)$"], 'interpreter', 'latex');
+legend(["$\mathcal{S}$", "$\mathcal{B}_1(S)$", "$\mathcal{B}_2(S)$", "$\mathcal{B}_3(S)$", "$\mathcal{B}_4(S)$"], 'interpreter', 'latex');
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Auxillary functions
