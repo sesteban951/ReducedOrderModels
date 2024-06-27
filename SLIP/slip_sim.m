@@ -4,30 +4,20 @@
 clear all; clc; close all;
 
 % system parameters
-params.g = 9.81;    % gravity
+params.g = -9.81;    % gravity
 params.l = 1.0;     % leg length
 params.m = 1.0;     % mass
-params.k = 10.0;    % spring constant
+params.k = 20.0;    % spring constant
 params.K = 0.0;     % controller gain
 
 % simulation times
-tspan = [0, 1];
+tspan = [0, 5];
 
 % % intial flight condition
-% x0 = [0;   % y
-%       3;   % z
-%       0.1; % ydot
-%       0];  % zdot
-
-% intial ground condition
-x0 = [0.5;  % r
-      pi/2; % th
-      0;    % rdot
-      0];   % thdot
-
-[t, x] = ode45(@(t, x) slip_ground_dynamics(x, params), tspan, x0);
-x = convert
-
+x0 = [0;   % y
+      3;   % z
+      0.1; % ydot
+      0];  % zdot
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % SUPPORT FUNCTIONS
@@ -120,19 +110,20 @@ function X_polar = convert_cart_to_polar_states(x_cart)
     end
 end
 
-% convert a polar state to cartesian state, where the origin is at the foot
-function x_cart = polar_to_cart(x_polar)
-    r = x_polar(1);
-    th = x_polar(2);
-    rdot = x_polar(3);
-    thdot = x_polar(4);
+% convert a cartesian state to polar state where the origin is at the foot
+% https://math.stackexchange.com/questions/2444965/relationship-between-cartesian-velocity-and-polar-velocity
+function x_polar = cart_to_polar(x_cart)
+    y = x_cart(1);
+    z = x_cart(2);
+    ydot = x_cart(3);
+    zdot = x_cart(4);
 
-    y = -r * sin(th);
-    z =  r * cos(th);
-    ydot = -rdot * sin(th) - r * thdot * cos(th);
-    zdot =  rdot * cos(th) - r * thdot * sin(th);
+    r = sqrt(y^2 + z^2);
+    th = atan2(y, z); 
+    rdot = (y*ydot + z*zdot) / r;
+    thdot = (y*zdot - z*ydot) / r^2;
 
-    x_cart = [y; z; ydot; zdot];
+    x_polar = [r; th; rdot; thdot];
 end
 
 % convert all polar states to cartesian states
@@ -149,18 +140,17 @@ function X_cart = convert_polar_to_cart_states(x_polar)
     end
 end
 
-% convert a cartesian state to polar state where the origin is at the foot
-% https://math.stackexchange.com/questions/2444965/relationship-between-cartesian-velocity-and-polar-velocity
-function x_polar = cart_to_polar(x_cart)
-    y = x_cart(1);
-    z = x_cart(2);
-    ydot = x_cart(3);
-    zdot = x_cart(4);
+% convert a polar state to cartesian state, where the origin is at the foot
+function x_cart = polar_to_cart(x_polar)
+    r = x_polar(1);
+    th = x_polar(2);
+    rdot = x_polar(3);
+    thdot = x_polar(4);
 
-    r = sqrt(y^2 + z^2);
-    th = atan2(y, z); 
-    rdot = 0.0;
-    thdot = 0.0;
+    y = -r * sin(th);
+    z =  r * cos(th);
+    ydot = -rdot * sin(th) - r * thdot * cos(th);
+    zdot =  rdot * cos(th) - r * thdot * sin(th);
 
-    x_polar = [r; th; rdot; thdot];
+    x_cart = [y; z; ydot; zdot];
 end
