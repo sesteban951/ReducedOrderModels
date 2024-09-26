@@ -4,12 +4,12 @@
 clear all; clc; close all;
 
 % SLIP params
-params.k = 100;   % spring constant
-params.br = 5.0;  % damping
-params.bt = 1.0;  % damping
-params.m = 1;     % CoM mass
+params.k = 150;   % spring constant
+params.br = 0.1;  % damping along spring
+params.bt = 0.1;  % damping along pivot point
+params.m = 22;    % CoM mass
 params.g = 9.81;  % gravity
-params.l0 = 1;    % spring free length
+params.l0 = 0.5;  % spring free length
 
 % make dynamics functions
 [f_ground, f_flight] = make_func(params);
@@ -18,9 +18,9 @@ params.l0 = 1;    % spring free length
 
 % sim params
 dt = 0.01;
-t_max = 1.0;
+t_max = 10.0;
 t_inf = 10E3;
-tspan = [0, t_inf];
+tspan = [0, t_inf];  % to allow for switching before timeout
 
 % set the switching conditions
 opt_g2f = odeset('Events', @(t,x)guard_g2f(t,x,params));
@@ -69,12 +69,12 @@ plot(X(1,1),X(1,2),'.g');
 plot(X(end,1),X(end,2),'.r');
 xline(0); yline(0);
 
-% plot CoM location
+% % plot CoM location
 % cart = to_cartesian(x);
-% 
+
 % figure(1); axis equal;
 % drawSLIP(t,cart,params);
-% 
+
 % figure(2);
 % set(gcf,'position',[0,0,700,700])
 % subplot(1,2,1);
@@ -86,7 +86,7 @@ xline(0); yline(0);
 % xlabel("$x$",'Interpreter','latex')
 % ylabel("$z$",'Interpreter','latex')
 % grid on; axis equal;
-% 
+
 % subplot(1,2,2);
 % plot(cart(:,3),cart(:,4),'b'); hold on;
 % plot(cart(1,3),cart(1,4), '.g');
