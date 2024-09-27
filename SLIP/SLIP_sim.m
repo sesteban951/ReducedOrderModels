@@ -3,8 +3,8 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 clear all; clc; close all;
 
-% SLIP params
-params.k = 250;  % spring constant [N/m]
+% SLIP paramss
+params.k = 150;  % spring constant [N/m]
 params.m = 1;    % CoM mass (Achilles mass 22 kg)
 params.g = 9.81;  % gravity
 params.l0 = 0.6;  % spring free length (Achilles leg length 0.7 m)
@@ -12,41 +12,39 @@ params.l0 = 0.6;  % spring free length (Achilles leg length 0.7 m)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % sim params
-dt = 0.005;
-tspan = 0:dt:2.0;  % to allow for switching before timeout
+dt = 0.01;
+tspan = 0:dt:3.0;  % to allow for switching before timeout
 
 % initial conditions (always start in flight)
 x0 = [0.0;   % x
-      1.0;   % z
+      2.0;   % z
       0.01;   % x_dot
-      -0.1];  % z_dot
+      0.0];  % z_dot
 domain = "flight";
 
-% % initial conditions (always start in flight)
-% x0 = [0.4;   % x
-%       0.0;   % z
-%       0.0;   % x_dot
-%       0.0];  % z_dot
-% domain = "ground";
+% initial foot angle
+alpha = 0;  % [deg]
+alpha = alpha * pi / 180;  % [rad]
 
 % set the switching manifolds
-options_f2g = odeset('Events', @(t,x)flight_to_ground(t, x, params), 'RelTol', 1e-7, 'AbsTol', 1e-8);
+options_f2g = odeset('Events', @(t,x)flight_to_ground(t, x, params, alpha), 'RelTol', 1e-7, 'AbsTol', 1e-8);
 options_g2f = odeset('Events', @(t,x)ground_to_flight(t, x, params), 'RelTol', 1e-7, 'AbsTol', 1e-8);
 
 % simulate the hybrid system
 t_current = 0;
 num_transitions = 0;
-max_num_transitions = 2;
+max_num_transitions = 3;
 D = [];  % domain storage
 T = [];  % time storage
 X = [];  % state storage
+F = [];  % groudn foot position storage
 while num_transitions <= max_num_transitions
     
     % switch domains
     if domain == "flight"
         
         disp("flight")
-        
+
         % flight: x = [x, z, x_dot, z_dot]
         [t_flight, x_flight] = ode45(@(t,x)dynamics_f(t,x,params), tspan, x0, options_f2g);
 
@@ -57,10 +55,15 @@ while num_transitions <= max_num_transitions
   
         % udpate the current time and the intial state
         t_current = T(end);
-    
-        % apply reset map (includes cartesian to polar conversion)
+
+        % calculate the ground foot position
+        p_foot = [x_flight(end,1) + params.l0 * sin(alpha); 
+                  x_flight(end,2) - params.l0 * cos(alpha)];
+        F = [F; p_foot'];
+
+        % set new initial condition
         x0 = x_flight(end,:);
-        x0 = cart_to_polar(x0, params);
+        x0 = cart_to_polar(x0, params, alpha);
 
         % define new domain
         domain = "ground";
@@ -75,7 +78,8 @@ while num_transitions <= max_num_transitions
 
         % convert the polar state to cartesian
         for i = 1:length(t_ground)
-            x_ground(i,:) = polar_to_cart(x_ground(i,:), params);
+            x_ground(i,:) = polar_to_cart(x_ground(i,:)); % convert it to cartesian
+            x_ground(i,1) = x_ground(i,1) + p_foot(1);            % add the foot position offset
         end
 
         % store the trajectory
@@ -83,12 +87,10 @@ while num_transitions <= max_num_transitions
         T = [T; t_ground + t_current];
         X = [X; x_ground];
 
-        % TODO: figure out foot stuff and global position
-
         % udpate the current time and the intial state
         t_current = T(end);
 
-        % apply reset map (includes polar to cartesian conversion)
+        % set new initial condition
         x0 = x_ground(end,:);
     
         % define new domain
@@ -97,25 +99,21 @@ while num_transitions <= max_num_transitions
     end
 end
 
-% plot the trajectory
 figure;
 yline(0); hold on;
+
+% plot com trajectory
 for i = 1:length(D)
     if D(i) == 0
-        plot(T(i), X(i,2), 'b.');  % in flight
+        plot(X(i,1), X(i,2), 'b.');  % in flight
     elseif D(i) == 1
-        plot(T(i), X(i,2), 'r.');  % on the ground
+        plot(X(i,1), X(i,2), 'r.');  % on the ground
     end
 end
 
-figure;
-yline(0); hold on;
-for i = 1:length(D)
-    if D(i) == 0
-        plot(T(i), X(i,1), 'b.');  % in flight
-    elseif D(i) == 1
-        plot(T(i), X(i,1), 'r.');  % on the ground
-    end
+% plot the ground foot position
+for i =  1:length(F)
+    plot(F(i,1), F(i,2), 'kx');
 end
 
 
@@ -163,10 +161,9 @@ end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % guard: flight to ground
-function [value, isterminal, direction] = flight_to_ground(~, x_cart, params)
+function [value, isterminal, direction] = flight_to_ground(~, x_cart, params, alpha)
     
     % to determine if the SLIP foot has hit the ground
-    alpha = 0;
     z_com = x_cart(2);
     foot_height = z_com - params.l0 * cos(alpha);
 
@@ -184,7 +181,7 @@ function [value, isterminal, direction] = ground_to_flight(~, x_polar, params)
 
     % leg length is uncompressed, r = l0
     l = [x_cart(1); x_cart(2)];
-    leg_length = norm(l);  % Euclidean length of the leg
+    leg_length = norm(l);                        % Euclidean length of the leg
     compressed_length = leg_length - params.l0;  % difference from nominal uncompressed length
 
     % taking off condition, vel >= 0
@@ -197,14 +194,11 @@ function [value, isterminal, direction] = ground_to_flight(~, x_polar, params)
 
     if compressed_length >= 0
         if vel >= 0
-            disp("compressed_length >= 0 and vel >= 0")
             value = 0;
         else
-            disp("compressed_length >= 0 and vel < 0")
             value = 1;
         end
     else
-        disp("compressed_length < 0")
         value = 1;
     end
 
@@ -218,7 +212,7 @@ end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % convert a cartesian state to polar state where the origin is at the foot
-function x_polar = cart_to_polar(x_cart, params)
+function x_polar = cart_to_polar(x_cart, params, alpha)
     
     % flight state, x = [x, z, x_dot, z_dot]
     x = x_cart(1);
@@ -227,7 +221,6 @@ function x_polar = cart_to_polar(x_cart, params)
     zdot = x_cart(4);
 
     % positions
-    alpha = 0;
     p_com = [x; z];  % CoM position
     p_foot = [x + params.l0 * sin(alpha); z - params.l0 * cos(alpha)]; % foot position
 
@@ -243,16 +236,18 @@ function x_polar = cart_to_polar(x_cart, params)
 end
 
 % convert a polar state to cartesian state, where the origin is at the foot
-function x_cart = polar_to_cart(x_polar, params)
+function x_cart = polar_to_cart(x_polar)
+    
+    % ground state, x = [r, theta, r_dot, theta_dot]
     r = x_polar(1);
     th = x_polar(2);
     rdot = x_polar(3);
     thdot = x_polar(4);
 
-    x = -r * sin(th);
+    x = r * sin(th);
     z =  r * cos(th);
-    xdot = -rdot * sin(th) - r * thdot * cos(th);
+    xdot = (rdot * sin(th) + r * thdot * cos(th));
     zdot =  rdot * cos(th) - r * thdot * sin(th);
 
-    x_cart = [x; z; xdot; zdot]
+    x_cart = [x; z; xdot; zdot];
 end
