@@ -4,7 +4,7 @@
 clear all; clc; close all;
 
 % SLIP params
-params.k = 7500; % spring constant [N/m]
+params.k = 7500;  % spring constant [N/m]
 params.m = 22;    % CoM mass (Achilles mass 22 kg)
 params.g = 9.81;  % gravity
 params.l0 = 0.6;  % spring free length (Achilles leg length 0.7 m)
@@ -22,16 +22,24 @@ x0 = [0.0;   % x
       0.0];  % z_dot
 domain = "flight";
 
+% % initial conditions (always start in flight)
+% x0 = [0.4;   % x
+%       0.0;   % z
+%       0.0;   % x_dot
+%       0.0];  % z_dot
+% domain = "ground";
+
 % set the switching manifolds
-options_f2g = odeset('Events', @(t,x)flight_to_ground(t, x, params), 'RelTol', 1e-5, 'AbsTol', 1e-7);
-options_g2f = odeset('Events', @(t,x)ground_to_flight(t, x, params), 'RelTol', 1e-5, 'AbsTol', 1e-7);
+options_f2g = odeset('Events', @(t,x)flight_to_ground(t, x, params), 'RelTol', 1e-6, 'AbsTol', 1e-8);
+options_g2f = odeset('Events', @(t,x)ground_to_flight(t, x, params), 'RelTol', 1e-6, 'AbsTol', 1e-8);
 
 % simulate the hybrid system
-t_current = tspan(1);
+t_current = 0;
 num_transitions = 0;
-max_num_transitions = 2;
-T = [];
-X = [];
+max_num_transitions = 3;
+D = [];  % domain storage
+T = [];  % time storage
+X = [];  % state storage
 while num_transitions <= max_num_transitions
     
     % switch domains
@@ -43,20 +51,16 @@ while num_transitions <= max_num_transitions
         [t_flight, x_flight] = ode45(@(t,x)dynamics_f(t,x,params), tspan, x0, options_f2g);
 
         % store the trajectory
+        D = [D; 0 * ones(length(t_flight),1)];
         T = [T; t_flight + t_current];
         X = [X; x_flight];
   
-        figure; hold on;
-        plot(t_flight, x_flight(:,2), 'b.');
-        xlabel('x'); ylabel('z');
-        yline(0);
-
         % udpate the current time and the intial state
         t_current = T(end);
     
         % apply reset map (includes cartesian to polar conversion)
         x0 = x_flight(end,:);
-        x0 = cart_to_polar(x0)
+        x0 = cart_to_polar(x0);
 
         % define new domain
         domain = "ground";
@@ -69,27 +73,37 @@ while num_transitions <= max_num_transitions
         % ground: x = [r, theta, r_dot, theta_dot]
         [t_ground, x_ground] = ode45(@(t,x)dynamics_g(t,x,params), tspan, x0, options_g2f); 
 
+        % convert the polar state to cartesian
+        for i = 1:length(t_ground)
+            x_ground(i,:) = polar_to_cart(x_ground(i,:));
+        end
+
         % store the trajectory
+        D = [D; 1 * ones(length(t_ground),1)];
         T = [T; t_ground + t_current];
         X = [X; x_ground];
-
-        figure; hold on;
-        x_pos = -x_ground(:,1) .* sin(x_ground(:,2));
-        z_pos = x_ground(:,1) .* cos(x_ground(:,2));
-        plot(t_ground, z_pos, 'r.');
 
         % udpate the current time and the intial state
         t_current = T(end);
 
         % apply reset map (includes polar to cartesian conversion)
         x0 = x_ground(end,:);
-        x0 = polar_to_cart(x0)
     
         % define new domain
         domain = "flight";
         num_transitions = num_transitions + 1;
     end
+end
 
+% plot the trajectory
+figure;
+yline(0); hold on;
+for i = 1:length(D)
+    if D(i) == 0
+        plot(T(i), X(i,2), 'b.');  % in flight
+    elseif D(i) == 1
+        plot(T(i), X(i,2), 'r.');  % on the ground
+    end
 end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -178,7 +192,7 @@ function [value, isterminal, direction] = ground_to_flight(~, x_polar, params)
 
     % Ensure the solver stops when both conditions are met
     isterminal = 1;  % Stop integration when event is triggered
-    direction =  0;  % compressed_length must be decreasing (zero-crossing from positive to negative)
+    direction =  1;  % compressed_length must be increasing (zero-crossing from positive to negative)
 end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
