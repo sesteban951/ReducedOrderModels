@@ -4,34 +4,35 @@
 clear all; clc; close all;
 
 % SLIP params
-params.k = 150;   % spring constant
-params.m = 22;    % CoM mass (Achilles mass)
+params.k = 7500; % spring constant [N/m]
+params.m = 22;    % CoM mass (Achilles mass 22 kg)
 params.g = 9.81;  % gravity
-params.l0 = 0.7;  % spring free length (Achilles leg length)
+params.l0 = 0.6;  % spring free length (Achilles leg length 0.7 m)
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % sim params
-dt = 0.01;
-tspan = 0:dt:100.0;  % to allow for switching before timeout
+dt = 0.005;
+tspan = 0:dt:2.0;  % to allow for switching before timeout
 
 % initial conditions (always start in flight)
 x0 = [0.0;   % x
-      2.0;   % z
-      0.5;   % x_dot
+      1.0;   % z
+      0.0;   % x_dot
       0.0];  % z_dot
 domain = "flight";
 
 % set the switching manifolds
-options_f2g = odeset('Events', @(t,x)flight_to_ground(t, x, params));
+options_f2g = odeset('Events', @(t,x)flight_to_ground(t, x, params), 'RelTol', 1e-5, 'AbsTol', 1e-7);
+options_g2f = odeset('Events', @(t,x)ground_to_flight(t, x, params), 'RelTol', 1e-5, 'AbsTol', 1e-7);
 
 % simulate the hybrid system
 t_current = tspan(1);
 num_transitions = 0;
-max_num_transitions = 8;
+max_num_transitions = 2;
 T = [];
 X = [];
-while num_transitions < max_num_transitions
+while num_transitions <= max_num_transitions
     
     % switch domains
     if domain == "flight"
@@ -44,13 +45,18 @@ while num_transitions < max_num_transitions
         % store the trajectory
         T = [T; t_flight + t_current];
         X = [X; x_flight];
+  
+        figure; hold on;
+        plot(t_flight, x_flight(:,2), 'b.');
+        xlabel('x'); ylabel('z');
+        yline(0);
 
         % udpate the current time and the intial state
-        t_current = T(end)
+        t_current = T(end);
     
-        % apply reset map
+        % apply reset map (includes cartesian to polar conversion)
         x0 = x_flight(end,:);
-        x0(4) = -0.8*x0(4); % flip the z_dot
+        x0 = cart_to_polar(x0)
 
         % define new domain
         domain = "ground";
@@ -61,30 +67,30 @@ while num_transitions < max_num_transitions
         disp("ground")
 
         % ground: x = [r, theta, r_dot, theta_dot]
-        [t_ground, x_ground] = ode45(@(t,x)dynamics_f(t,x,params), tspan, x0, options_f2g);
+        [t_ground, x_ground] = ode45(@(t,x)dynamics_g(t,x,params), tspan, x0, options_g2f); 
 
         % store the trajectory
         T = [T; t_ground + t_current];
         X = [X; x_ground];
 
+        figure; hold on;
+        x_pos = -x_ground(:,1) .* sin(x_ground(:,2));
+        z_pos = x_ground(:,1) .* cos(x_ground(:,2));
+        plot(t_ground, z_pos, 'r.');
+
         % udpate the current time and the intial state
-        t_current = T(end)
+        t_current = T(end);
 
-        % apply reset map
+        % apply reset map (includes polar to cartesian conversion)
         x0 = x_ground(end,:);
-        x0(4) = -0.8*x0(4); % flip the theta_dot
-
+        x0 = polar_to_cart(x0)
+    
         % define new domain
         domain = "flight";
         num_transitions = num_transitions + 1;
     end
 
 end
-
-% plot the trajectory
-figure;
-plot(X(:,1), X(:,2)); hold on;
-
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % DYNAMICS
@@ -94,8 +100,6 @@ plot(X(:,1), X(:,2)); hold on;
 function xdot = dynamics_f(~, x_cart, params)
     
     % cartesian state, x = [x, z, x_dot, z_dot]
-    % x = x_cart(1);
-    % z = x_cart(2);
     x_dot = x_cart(3);
     z_dot = x_cart(4);
 
@@ -132,7 +136,7 @@ end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % guard: flight to ground
-function [value, isterminal, direction] = flight_to_ground(t, x_cart, params)
+function [value, isterminal, direction] = flight_to_ground(~, x_cart, params)
     
     % to determine if the SLIP foot has hit the ground
     z_com = x_cart(2);
@@ -140,28 +144,58 @@ function [value, isterminal, direction] = flight_to_ground(t, x_cart, params)
     foot_height = z_com - l0;
 
     % guard conditions
-    value = foot_height;      % foot height at ground
-    isterminal = 1; 
-    direction = -1; 
+    value = foot_height;  % foot height at ground
+    isterminal = 1;       % 1: stop integrating
+    direction = -1;       % direction 
 end
 
+% guard: ground to flight, leg condition
+function [value, isterminal, direction] = ground_to_flight(~, x_polar, params)
+
+    % equivalent representation in cartesian coordinates
+    x_cart = polar_to_cart(x_polar);
+
+    % leg length is uncompressed, r = l0
+    l = [x_cart(1); x_cart(2)];
+    leg_length = norm(l);  % Euclidean length of the leg
+    compressed_length = leg_length - params.l0;  % difference from nominal uncompressed length
+
+    % taking off condition, vel >= 0
+    xdot = x_cart(3); 
+    zdot = x_cart(4);  
+    v_com = [xdot; zdot];  
+    l_unit = l / leg_length;       % unit vector along the leg
+    v_unit = v_com / norm(v_com);  % unit vector of the CoM velocity
+    vel = l_unit' * v_unit;        % velocity of the CoM along the leg direction
+
+    if compressed_length >= 0
+        if vel >= 0
+            value = 0;
+        end
+    else
+        value = compressed_length;
+    end
+
+    % Ensure the solver stops when both conditions are met
+    isterminal = 1;  % Stop integration when event is triggered
+    direction =  0;  % compressed_length must be decreasing (zero-crossing from positive to negative)
+end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % convert caterisan <---> polar coordinates
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % convert a cartesian state to polar state where the origin is at the foot
-% https://math.stackexchange.com/questions/2444965/relationship-between-cartesian-velocity-and-polar-velocity
 function x_polar = cart_to_polar(x_cart)
-    y = x_cart(1);
+    x = x_cart(1);
     z = x_cart(2);
-    ydot = x_cart(3);
+    xdot = x_cart(3);
     zdot = x_cart(4);
 
-    r = sqrt(y^2 + z^2);
-    th = atan2(y, z); 
-    rdot = (y*ydot + z*zdot) / r;
-    thdot = (y*zdot - z*ydot) / r^2;
+    r = sqrt(x^2 + z^2);
+    th = atan2(x, z);     % be carefule about arctan2
+    rdot = (x*xdot + z*zdot) / r;
+    thdot = (xdot*z - x*zdot) / r^2;
 
     x_polar = [r; th; rdot; thdot];
 end
