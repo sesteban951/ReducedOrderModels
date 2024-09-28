@@ -4,10 +4,11 @@
 clear all; clc; close all;
 
 % SLIP paramss
-params.k = 1000;  % spring constant [N/m]
+params.k = 250;  % spring constant [N/m]
 params.m = 1;    % CoM mass (Achilles mass 22 kg)
 params.g = 9.81;  % gravity
 params.l0 = 0.6;  % spring free length (Achilles leg length 0.7 m)
+params.K = 0.20;  % Raibert controller gain
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -17,14 +18,14 @@ tspan = 0:dt:3.0;  % to allow for switching before timeout
 
 % initial conditions (always start in flight)
 x0 = [0.0;   % x
-      2.0;   % z
-      0.5;  % x_dot
+      1.0;   % z
+      0.1;  % x_dot
       0.0];  % z_dot
 domain = "flight";
 
 % initial foot angle
+alpha_prev = 0;
 alpha = angle_control(x0, params);
-alpha = alpha * pi / 180;  % [rad]
 
 % set the switching manifolds
 options_f2g = odeset('Events', @(t,x)flight_to_ground(t, x, params), 'RelTol', 1e-7, 'AbsTol', 1e-8);
@@ -33,7 +34,7 @@ options_g2f = odeset('Events', @(t,x)ground_to_flight(t, x, params), 'RelTol', 1
 % simulate the hybrid system
 t_current = 0;
 num_transitions = 0;
-max_num_transitions = 10;
+max_num_transitions = 25;
 D = [];  % domain storage
 T = [];  % time storage
 X = [];  % state storage
@@ -56,10 +57,12 @@ while num_transitions <= max_num_transitions
         % udpate the current time and the intial state
         t_current = T(end);
 
-        % calculate the ground foot position
-        p_foot = [x_flight(end,1) + params.l0 * sin(alpha); 
-                  x_flight(end,2) - params.l0 * cos(alpha)];
-        F = [F; p_foot'];
+        % compute foot trajectory
+        for i = 1:length(t_flight)
+            p_foot = [x_flight(i,1) + params.l0 * sin(alpha); 
+                      x_flight(i,2) - params.l0 * cos(alpha)];
+            F = [F; p_foot'];
+        end
 
         % set new initial condition
         x0 = x_flight(end,:);
@@ -90,6 +93,12 @@ while num_transitions <= max_num_transitions
         % udpate the current time and the intial state
         t_current = T(end);
 
+        % compute foot trajectory
+        for i = 1:length(t_ground)
+            p_foot = F(end,:);
+            F = [F; p_foot];
+        end
+
         % set new initial condition
         x0 = x_ground(end,:);
         alpha = angle_control(x0, params);
@@ -100,21 +109,61 @@ while num_transitions <= max_num_transitions
     end
 end
 
-figure;
-yline(0); hold on;
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% PLOT
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% plot com trajectory
-for i = 1:length(D)
-    if D(i) == 0
-        plot(X(i,1), X(i,2), 'b.');  % in flight
-    elseif D(i) == 1
-        plot(X(i,1), X(i,2), 'r.');  % on the ground
+% create a new figure
+figure('Name', 'SLIP Simulation');
+hold on;
+yline(0);
+xlabel('$p_x$ [m]', 'Interpreter', 'latex', 'FontSize', 16);
+ylabel('$p_z$ [m]', 'Interpreter', 'latex', 'FontSize', 16);
+
+% set axis limits
+x_min = min(X(:,1)) - 0.1;
+x_max = max(X(:,1)) + 0.1;
+z_min = -0.1;
+z_max = max(X(:,2)) + 0.1;
+xlim([x_min, x_max]);
+ylim([z_min, z_max]);
+
+tic;
+t_now = T(1);
+ind = 1;
+while t_now < T(end)
+
+    % plot the foot and pole
+    pole = plot([F(ind,1), X(ind,1)], [F(ind,2), X(ind,2)], 'k', 'LineWidth', 2.5);
+    foot = plot(F(ind,1), F(ind,2), 'ko', 'MarkerSize', 10, 'MarkerFaceColor', 'k');  % in flight
+
+    % plot the SLIP COM
+    if D(ind) == 0
+        com = plot(X(ind,1), X(ind,2), 'ko', 'MarkerSize', 20, 'MarkerFaceColor', 'b');  % on the ground
+    elseif D(ind) == 1
+        com = plot(X(ind,1), X(ind,2), 'ko', 'MarkerSize', 20, 'MarkerFaceColor', 'r');  % in flight
     end
-end
+    
+    % current time
+    time = sprintf("Time = %.2f", T(ind));
+    title(time,'Interpreter','latex', 'FontSize', 16)   
+    
+    drawnow;
 
-% plot the ground foot position
-for i =  1:length(F)
-    plot(F(i,1), F(i,2), 'kx');
+    % wait until the next time step
+    while toc < T(ind+1)
+        % wait
+    end
+
+    % increment the index
+    if ind+1 == length(T)
+        break
+    else
+        ind = ind + 1;
+        delete(pole);
+        delete(foot);
+        delete(com);
+    end
 end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -164,7 +213,7 @@ end
 function alpha = angle_control(x_cart, params)
     
     % simple Raibert controller
-    K = 0.15;
+    K = params.K;
     alpha = K * x_cart(3);
 end
 
@@ -203,9 +252,7 @@ function [value, isterminal, direction] = ground_to_flight(~, x_polar, params)
     xdot = x_cart(3); 
     zdot = x_cart(4);  
     v_com = [xdot; zdot];  
-    l_unit = l / leg_length;       % unit vector along the leg
-    v_unit = v_com / norm(v_com);  % unit vector of the CoM velocity
-    vel = l_unit' * v_unit;        % velocity of the CoM along the leg direction
+    vel = l' * v_com;        % velocity of the CoM along the leg direction
 
     if compressed_length >= 0
         if vel >= 0
