@@ -4,22 +4,26 @@
 clear all; clc; close all;
 
 % SLIP paramss
-params.k = 250;  % spring constant [N/m]
-params.m = 1;    % CoM mass (Achilles mass 22 kg)
+params.k = 15000;  % spring constant [N/m]
+params.m = 22;    % CoM mass (Achilles mass 22 kg)
 params.g = 9.81;  % gravity
 params.l0 = 0.6;  % spring free length (Achilles leg length 0.7 m)
 params.K = 0.20;  % Raibert controller gain
 
+% plotting parameters
+realtime_rate = 1.0;
+n_points = 100;
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % sim params
-dt = 0.01;
+dt = 0.005;
 tspan = 0:dt:3.0;  % to allow for switching before timeout
 
 % initial conditions (always start in flight)
 x0 = [0.0;   % x
       1.0;   % z
-      0.1;  % x_dot
+      3.0;  % x_dot
       0.0];  % z_dot
 domain = "flight";
 
@@ -34,7 +38,7 @@ options_g2f = odeset('Events', @(t,x)ground_to_flight(t, x, params), 'RelTol', 1
 % simulate the hybrid system
 t_current = 0;
 num_transitions = 0;
-max_num_transitions = 25;
+max_num_transitions = 20;
 D = [];  % domain storage
 T = [];  % time storage
 X = [];  % state storage
@@ -101,6 +105,7 @@ while num_transitions <= max_num_transitions
 
         % set new initial condition
         x0 = x_ground(end,:);
+        alpha_prev = alpha;
         alpha = angle_control(x0, params);
     
         % define new domain
@@ -116,17 +121,22 @@ end
 % create a new figure
 figure('Name', 'SLIP Simulation');
 hold on;
-yline(0);
+xline(0); yline(0);
 xlabel('$p_x$ [m]', 'Interpreter', 'latex', 'FontSize', 16);
 ylabel('$p_z$ [m]', 'Interpreter', 'latex', 'FontSize', 16);
+axis equal;
 
 % set axis limits
-x_min = min(X(:,1)) - 0.1;
-x_max = max(X(:,1)) + 0.1;
 z_min = -0.1;
 z_max = max(X(:,2)) + 0.1;
-xlim([x_min, x_max]);
 ylim([z_min, z_max]);
+
+% scale time for animation
+T = T / realtime_rate;
+
+% Number of points to record
+com_history = [];  % Initialize an empty array to store the last 20 COM points
+com_history_plot = [];  % Initialize a variable to store the plot handle for the history
 
 tic;
 t_now = T(1);
@@ -139,15 +149,34 @@ while t_now < T(end)
 
     % plot the SLIP COM
     if D(ind) == 0
-        com = plot(X(ind,1), X(ind,2), 'ko', 'MarkerSize', 20, 'MarkerFaceColor', 'b');  % on the ground
+        com = plot(X(ind,1), X(ind,2), 'ko', 'MarkerSize', 30, 'MarkerFaceColor', 'b');  % on the ground
     elseif D(ind) == 1
-        com = plot(X(ind,1), X(ind,2), 'ko', 'MarkerSize', 20, 'MarkerFaceColor', 'r');  % in flight
+        com = plot(X(ind,1), X(ind,2), 'ko', 'MarkerSize', 30, 'MarkerFaceColor', 'r');  % in flight
     end
+
+    % Update the history of the last n_points
+    com_history = [com_history; X(ind, [1, 2])];  % Add the current point to history
+    if size(com_history, 1) > n_points
+        com_history = com_history(2:end, :);  % Remove the oldest point if we exceed n_points
+    end
+
+    % Clear previous history plot
+    if ~isempty(com_history_plot)
+        delete(com_history_plot);
+    end
+
+    % Plot the last 20 points
+    com_history_plot = plot(com_history(:, 1), com_history(:, 2), 'g.', 'MarkerSize', 8);  % Plot history
     
     % current time
-    time = sprintf("Time = %.2f", T(ind));
+    time = sprintf("Time = %.2f", T(ind) * realtime_rate);
     title(time,'Interpreter','latex', 'FontSize', 16)   
     
+    % adjust the x_axis width
+    x_min = X(ind,1) - 1.0;
+    x_max = X(ind,1) + 1.0;
+    xlim([x_min, x_max]);
+
     drawnow;
 
     % wait until the next time step
