@@ -7,12 +7,12 @@ clear all; clc; close all;
 params.k = 15000;  % spring constant [N/m]
 params.m = 22;    % CoM mass (Achilles mass 22 kg)
 params.g = 9.81;  % gravity
-params.l0 = 0.6;  % spring free length (Achilles leg length 0.7 m)
-params.K = 0.20;  % Raibert controller gain
+params.l0 = 0.5;  % spring free length (Achilles leg length 0.7 m)
+params.K = 0.15;  % Raibert controller gain
 
 % plotting parameters
 realtime_rate = 1.0;
-n_points = 100;
+n_points = 75;
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -23,7 +23,7 @@ tspan = 0:dt:3.0;  % to allow for switching before timeout
 % initial conditions (always start in flight)
 x0 = [0.0;   % x
       1.0;   % z
-      3.0;  % x_dot
+      3.5;  % x_dot
       0.0];  % z_dot
 domain = "flight";
 
