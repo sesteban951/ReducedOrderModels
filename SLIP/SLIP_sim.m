@@ -18,6 +18,12 @@ n_points = 75;
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+animation = 0;  % 1: animate, 0: no animation
+orbit = 1;
+poincare = 1;   % 1: plot poincare section, 0: no poincare section
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 % sim params
 freq = 250;
 dt = 1/freq;
@@ -26,7 +32,7 @@ tspan = 0:dt:3.0;  % to allow for switching before timeout
 % initial conditions (always start in flight)
 x0 = [0.0;   % x
       1.0;   % z
-      2.5;  % x_dot
+      2.0;  % x_dot
       0.0];  % z_dot
 domain = "flight";
 
@@ -42,6 +48,7 @@ alpha = angle_control(x0, params, x_des);
 % set the switching manifolds
 options_f2g = odeset('Events', @(t,x)flight_to_ground(t, x, params, x_des), 'RelTol', 1e-8, 'AbsTol', 1e-9);
 options_g2f = odeset('Events', @(t,x)ground_to_flight(t, x, params), 'RelTol', 1e-8, 'AbsTol', 1e-9);
+options_poincare = odeset('Events', @(t,x)poincare_section(t, x), 'RelTol', 1e-8, 'AbsTol', 1e-9);
 
 % simulate the hybrid system
 t_current = 0;
@@ -50,7 +57,10 @@ max_num_transitions = 35;
 D = [];  % domain storage
 T = [];  % time storage
 X = [];  % state storage
+T_apex = [];  % apex time storage
+X_apex = [];  % apex state storage
 F = [];  % ground foot position storage
+
 while num_transitions <= max_num_transitions
     
     % switch domains
@@ -60,6 +70,9 @@ while num_transitions <= max_num_transitions
 
         % flight: x = [x, z, x_dot, z_dot]
         [t_flight, x_flight] = ode45(@(t,x)dynamics_f(t,x,params), tspan, x0, options_f2g);
+        [~, ~, t_apex, x_apex, ~] = ode45(@(t,x)dynamics_f(t,x,params), tspan, x0, options_poincare); % purely used for poincare section
+        T_apex = [T_apex; t_apex + t_current];
+        X_apex = [X_apex; x_apex];
 
         % store the trajectory
         D = [D; 0 * ones(length(t_flight),1)];
@@ -126,85 +139,113 @@ end
 % PLOT
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% create a new figure
-figure('Name', 'SLIP Simulation');
-hold on;
-xline(0); yline(0);
-xlabel('$p_x$ [m]', 'Interpreter', 'latex', 'FontSize', 16);
-ylabel('$p_z$ [m]', 'Interpreter', 'latex', 'FontSize', 16);
-axis equal;
-if params.K(1) ~= 0
-    xline(px_des, '--', 'Target', 'Color', "#A2142F", 'LineWidth', 1.5);
+if animation == 1
+
+    % create a new figure
+    figure('Name', 'SLIP Simulation');
+    hold on;
+    xline(0); yline(0);
+    xlabel('$p_x$ [m]', 'Interpreter', 'latex', 'FontSize', 16);
+    ylabel('$p_z$ [m]', 'Interpreter', 'latex', 'FontSize', 16);
+    axis equal;
+    if params.K(1) ~= 0
+        xline(px_des, '--', 'Target', 'Color', "k", 'LineWidth', 1.5);
+    end
+
+    % set axis limits
+    z_min = -0.1;
+    z_max = max(X(:,2)) + 0.1;
+    ylim([z_min, z_max]);
+
+    % scale time for animation
+    T = T / realtime_rate;
+
+    % Number of points to record
+    com_history = [];  % Initialize an empty array to store the last 20 COM points
+    com_history_plot = [];  % Initialize a variable to store the plot handle for the history
+
+    tic;
+    t_now = T(1);
+    ind = 1;
+    while t_now < T(end)
+
+        % plot the foot and pole
+        pole = plot([F(ind,1), X(ind,1)], [F(ind,2), X(ind,2)], 'k', 'LineWidth', 2.5);
+        foot = plot(F(ind,1), F(ind,2), 'ko', 'MarkerSize', 10, 'MarkerFaceColor', 'k');  % in flight
+
+        % plot the SLIP COM
+        if D(ind) == 0
+            com = plot(X(ind,1), X(ind,2), 'ko', 'MarkerSize', 30, 'MarkerFaceColor', 'b');  % on the ground
+        elseif D(ind) == 1
+            com = plot(X(ind,1), X(ind,2), 'ko', 'MarkerSize', 30, 'MarkerFaceColor', 'r');  % in flight
+        end
+
+        % Update the history of the last n_points
+        com_history = [com_history; X(ind, [1, 2])];  % Add the current point to history
+        if size(com_history, 1) > n_points
+            com_history = com_history(2:end, :);  % Remove the oldest point if we exceed n_points
+        end
+
+        % Clear previous history plot
+        if ~isempty(com_history_plot)
+            delete(com_history_plot);
+        end
+
+        % Plot the last 20 points
+        com_history_plot = plot(com_history(:, 1), com_history(:, 2), 'g.', 'MarkerSize', 8);  % Plot history
+        
+        % current time
+        time = sprintf("Time = %.2f", T(ind) * realtime_rate);
+        title(time,'Interpreter','latex', 'FontSize', 16)   
+        
+        % adjust the x_axis width
+        x_min = X(ind,1) - 1.0;
+        x_max = X(ind,1) + 1.0;
+        xlim([x_min, x_max]);
+
+        drawnow;
+
+        % wait until the next time step
+        while toc < T(ind+1)
+            % wait
+        end
+
+        % increment the index
+        if ind+1 == length(T)
+            break
+        else
+            ind = ind + 1;
+            delete(pole);
+            delete(foot);
+            delete(com);
+        end
+    end
 end
 
-% set axis limits
-z_min = -0.1;
-z_max = max(X(:,2)) + 0.1;
-ylim([z_min, z_max]);
+if orbit == 1
+    figure("Name", "Orbit Diagram");
+    hold on; grid on;
 
-% scale time for animation
-T = T / realtime_rate;
-
-% Number of points to record
-com_history = [];  % Initialize an empty array to store the last 20 COM points
-com_history_plot = [];  % Initialize a variable to store the plot handle for the history
-
-tic;
-t_now = T(1);
-ind = 1;
-while t_now < T(end)
-
-    % plot the foot and pole
-    pole = plot([F(ind,1), X(ind,1)], [F(ind,2), X(ind,2)], 'k', 'LineWidth', 2.5);
-    foot = plot(F(ind,1), F(ind,2), 'ko', 'MarkerSize', 10, 'MarkerFaceColor', 'k');  % in flight
-
-    % plot the SLIP COM
-    if D(ind) == 0
-        com = plot(X(ind,1), X(ind,2), 'ko', 'MarkerSize', 30, 'MarkerFaceColor', 'b');  % on the ground
-    elseif D(ind) == 1
-        com = plot(X(ind,1), X(ind,2), 'ko', 'MarkerSize', 30, 'MarkerFaceColor', 'r');  % in flight
-    end
-
-    % Update the history of the last n_points
-    com_history = [com_history; X(ind, [1, 2])];  % Add the current point to history
-    if size(com_history, 1) > n_points
-        com_history = com_history(2:end, :);  % Remove the oldest point if we exceed n_points
-    end
-
-    % Clear previous history plot
-    if ~isempty(com_history_plot)
-        delete(com_history_plot);
-    end
-
-    % Plot the last 20 points
-    com_history_plot = plot(com_history(:, 1), com_history(:, 2), 'g.', 'MarkerSize', 8);  % Plot history
-    
-    % current time
-    time = sprintf("Time = %.2f", T(ind) * realtime_rate);
-    title(time,'Interpreter','latex', 'FontSize', 16)   
-    
-    % adjust the x_axis width
-    x_min = X(ind,1) - 1.0;
-    x_max = X(ind,1) + 1.0;
-    xlim([x_min, x_max]);
-
-    drawnow;
-
-    % wait until the next time step
-    while toc < T(ind+1)
-        % wait
-    end
-
-    % increment the index
-    if ind+1 == length(T)
-        break
-    else
-        ind = ind + 1;
-        delete(pole);
-        delete(foot);
-        delete(com);
-    end
+    % unpack the state
+    plot(X(:,2), X(:,4), 'b', 'MarkerSize', 10, 'LineWidth', 3.0);
+    xline(0); yline(0);
+    xlabel('$z$ [m]', 'Interpreter', 'latex', 'FontSize', 16);
+    ylabel('$\dot{z}$ [m/s]', 'Interpreter', 'latex', 'FontSize', 16);
 end
+
+if poincare == 1
+    
+    figure("Name", "Poincare Section");
+    hold on; grid on;
+
+    % plot the poincare section
+    plot(X(:,2), X(:,3), 'k.', 'MarkerSize', 5);
+    plot(X_apex(:,2), X_apex(:,3), 'kx', 'MarkerSize', 15);
+    xline(0); yline(0);
+    xlabel('$z$ [m]', 'Interpreter', 'latex', 'FontSize', 16);
+    ylabel('$\dot{x}$ [m/s]', 'Interpreter', 'latex', 'FontSize', 16);
+end
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % DYNAMICS
@@ -321,6 +362,22 @@ function [value, isterminal, direction] = ground_to_flight(~, x_polar, params)
     % Ensure the solver stops when both conditions are met
     isterminal = 1;  % Stop integration when event is triggered
     direction =  0;  % compressed_length must be increasing (zero-crossing from positive to negative)
+end
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Poincare section
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% apex: detect the peak of the flight phase
+function [value, isterminal, direction] = poincare_section(~, x_cart)
+
+    % poincare section
+    z_dot = x_cart(4);
+
+    value = z_dot;  % z_dot = 0
+    isterminal = 0; % stop integrating
+    direction = -1; % negative direction
+
 end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
