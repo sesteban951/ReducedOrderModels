@@ -4,11 +4,11 @@
 clear all; clc; close all;
 
 % SLIP paramss
-params.k = 15000;  % spring constant [N/m]
-params.m = 22;    % CoM mass (Achilles mass 22 kg)
-params.g = 9.81;  % gravity
-params.l0 = 0.5;  % spring free length (Achilles leg length 0.7 m)
-params.K = 0.15;  % Raibert controller gain
+params.k = 15000;        % spring constant [N/m]
+params.m = 22;           % CoM mass (Achilles mass 22 kg)
+params.g = 9.81;         % gravity
+params.l0 = 0.5;         % spring free length (Achilles leg length 0.7 m)
+params.K = [0.03, 0.18]; % Raibert controller gain
 
 % plotting parameters
 realtime_rate = 1.0;
@@ -27,18 +27,23 @@ x0 = [0.0;   % x
       0.0];  % z_dot
 domain = "flight";
 
+% desired state
+px_des = -1.5;
+vx_des = 0.0;
+x_des = [px_des; vx_des];
+
 % initial foot angle
 alpha_prev = 0;
-alpha = angle_control(x0, params);
+alpha = angle_control(x0, params, x_des);
 
 % set the switching manifolds
-options_f2g = odeset('Events', @(t,x)flight_to_ground(t, x, params), 'RelTol', 1e-7, 'AbsTol', 1e-8);
+options_f2g = odeset('Events', @(t,x)flight_to_ground(t, x, params, x_des), 'RelTol', 1e-7, 'AbsTol', 1e-8);
 options_g2f = odeset('Events', @(t,x)ground_to_flight(t, x, params), 'RelTol', 1e-7, 'AbsTol', 1e-8);
 
 % simulate the hybrid system
 t_current = 0;
 num_transitions = 0;
-max_num_transitions = 20;
+max_num_transitions = 35;
 D = [];  % domain storage
 T = [];  % time storage
 X = [];  % state storage
@@ -106,7 +111,7 @@ while num_transitions <= max_num_transitions
         % set new initial condition
         x0 = x_ground(end,:);
         alpha_prev = alpha;
-        alpha = angle_control(x0, params);
+        alpha = angle_control(x0, params, x_des);
     
         % define new domain
         domain = "flight";
@@ -125,6 +130,9 @@ xline(0); yline(0);
 xlabel('$p_x$ [m]', 'Interpreter', 'latex', 'FontSize', 16);
 ylabel('$p_z$ [m]', 'Interpreter', 'latex', 'FontSize', 16);
 axis equal;
+if params.K(1) ~= 0
+    xline(px_des, '--', 'Target', 'Color', "#A2142F", 'LineWidth', 1.5);
+end
 
 % set axis limits
 z_min = -0.1;
@@ -239,11 +247,19 @@ end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % control input
-function alpha = angle_control(x_cart, params)
+function alpha = angle_control(x_cart, params, x_des)
     
+    % unpack the desired state
+    px_des = x_des(1);
+    vx_des = x_des(2);
+
     % simple Raibert controller
     K = params.K;
-    alpha = K * x_cart(3);
+    K_p = K(1);
+    K_v = K(2);
+
+    % compute the desired angle
+    alpha = K_p * (x_cart(1) - px_des) + K_v * (x_cart(3) - vx_des);
 end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -251,10 +267,10 @@ end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % guard: flight to ground
-function [value, isterminal, direction] = flight_to_ground(~, x_cart, params)
+function [value, isterminal, direction] = flight_to_ground(~, x_cart, params, x_des)
 
     % get the angle of the foot
-    alpha = angle_control(x_cart, params);
+    alpha = angle_control(x_cart, params, x_des);
 
     % to determine if the SLIP foot has hit the ground
     z_com = x_cart(2);
