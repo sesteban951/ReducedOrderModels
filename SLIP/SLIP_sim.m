@@ -9,6 +9,8 @@ params.m = 22;           % CoM mass (Achilles mass 22 kg)
 params.g = 9.81;         % gravity
 params.l0 = 0.5;         % spring free length (Achilles leg length 0.7 m)
 params.K = [0.03, 0.18]; % Raibert controller gain
+alpha_max_deg = 60;      % max foot angle from verticle [deg]
+params.alpha_max = alpha_max_deg * (pi/180);  % max foot angle [rad]
 
 % plotting parameters
 realtime_rate = 1.0;
@@ -17,18 +19,19 @@ n_points = 75;
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % sim params
-dt = 0.005;
+freq = 250;
+dt = 1/freq;
 tspan = 0:dt:3.0;  % to allow for switching before timeout
 
 % initial conditions (always start in flight)
 x0 = [0.0;   % x
       1.0;   % z
-      3.5;  % x_dot
+      2.5;  % x_dot
       0.0];  % z_dot
 domain = "flight";
 
 % desired state
-px_des = -1.5;
+px_des = 10.0;
 vx_des = 0.0;
 x_des = [px_des; vx_des];
 
@@ -37,8 +40,8 @@ alpha_prev = 0;
 alpha = angle_control(x0, params, x_des);
 
 % set the switching manifolds
-options_f2g = odeset('Events', @(t,x)flight_to_ground(t, x, params, x_des), 'RelTol', 1e-7, 'AbsTol', 1e-8);
-options_g2f = odeset('Events', @(t,x)ground_to_flight(t, x, params), 'RelTol', 1e-7, 'AbsTol', 1e-8);
+options_f2g = odeset('Events', @(t,x)flight_to_ground(t, x, params, x_des), 'RelTol', 1e-8, 'AbsTol', 1e-9);
+options_g2f = odeset('Events', @(t,x)ground_to_flight(t, x, params), 'RelTol', 1e-8, 'AbsTol', 1e-9);
 
 % simulate the hybrid system
 t_current = 0;
@@ -260,6 +263,12 @@ function alpha = angle_control(x_cart, params, x_des)
 
     % compute the desired angle
     alpha = K_p * (x_cart(1) - px_des) + K_v * (x_cart(3) - vx_des);
+
+    % clip the angle to a range
+    alpha_low = -params.alpha_max;
+    alpha_high = params.alpha_max;
+    alpha = max(alpha_low, min(alpha_high, alpha));
+
 end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
