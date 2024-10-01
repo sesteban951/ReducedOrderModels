@@ -19,8 +19,8 @@ n_points = 75;
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 animation = 0;  % 1: animate, 0: no animation
-orbit = 1;
-poincare = 1;   % 1: plot poincare section, 0: no poincare section
+orbit = 0;      % 1: plot orbit diagram, 0: no orbit diagram
+poincare = 0;   % 1: plot poincare section, 0: no poincare section
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -43,10 +43,10 @@ x_des = [px_des; vx_des];
 
 % initial foot angle
 alpha_prev = 0;
-alpha = angle_control(x0, params, x_des);
+alpha = angle_control(0.0, x0, params);
 
 % set the switching manifolds
-options_f2g = odeset('Events', @(t,x)flight_to_ground(t, x, params, x_des), 'RelTol', 1e-8, 'AbsTol', 1e-9);
+options_f2g = odeset('Events', @(t,x)flight_to_ground(t, x, params), 'RelTol', 1e-8, 'AbsTol', 1e-9);
 options_g2f = odeset('Events', @(t,x)ground_to_flight(t, x, params), 'RelTol', 1e-8, 'AbsTol', 1e-9);
 options_poincare = odeset('Events', @(t,x)poincare_section(t, x), 'RelTol', 1e-8, 'AbsTol', 1e-9);
 
@@ -69,14 +69,14 @@ while num_transitions <= max_num_transitions
         disp("flight")
 
         % flight: x = [x, z, x_dot, z_dot]
-        [t_flight, x_flight] = ode45(@(t,x)dynamics_f(t,x,params), tspan, x0, options_f2g);
-        [~, ~, t_apex, x_apex, ~] = ode45(@(t,x)dynamics_f(t,x,params), tspan, x0, options_poincare); % purely used for poincare section
-        T_apex = [T_apex; t_apex + t_current];
+        [t_flight, x_flight] = ode45(@(t,x)dynamics_f(t,x,params), tspan + t_current, x0, options_f2g);
+        [~, ~, t_apex, x_apex, ~] = ode45(@(t,x)dynamics_f(t,x,params), tspan + t_current, x0, options_poincare); % purely used for poincare section
+        T_apex = [T_apex; t_apex];
         X_apex = [X_apex; x_apex];
 
         % store the trajectory
         D = [D; 0 * ones(length(t_flight),1)];
-        T = [T; t_flight + t_current];
+        T = [T; t_flight];
         X = [X; x_flight];
   
         % udpate the current time and the intial state
@@ -102,7 +102,7 @@ while num_transitions <= max_num_transitions
         disp("ground")
 
         % ground: x = [r, theta, r_dot, theta_dot]
-        [t_ground, x_ground] = ode45(@(t,x)dynamics_g(t,x,params), tspan, x0, options_g2f); 
+        [t_ground, x_ground] = ode45(@(t,x)dynamics_g(t,x,params), tspan + t_current, x0, options_g2f); 
 
         % convert the polar state to cartesian
         for i = 1:length(t_ground)
@@ -112,7 +112,7 @@ while num_transitions <= max_num_transitions
 
         % store the trajectory
         D = [D; 1 * ones(length(t_ground),1)];
-        T = [T; t_ground + t_current];
+        T = [T; t_ground];
         X = [X; x_ground];
 
         % udpate the current time and the intial state
@@ -127,7 +127,7 @@ while num_transitions <= max_num_transitions
         % set new initial condition
         x0 = x_ground(end,:);
         alpha_prev = alpha;
-        alpha = angle_control(x0, params, x_des);
+        alpha = angle_control(t0, x0, params);
     
         % define new domain
         domain = "flight";
@@ -291,9 +291,10 @@ end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % control input
-function alpha = angle_control(x_cart, params, x_des)
+function alpha = angle_control(t_abs, x_cart, params)
     
     % unpack the desired state
+    x_des = trajectory(t_abs);
     px_des = x_des(1);
     vx_des = x_des(2);
 
@@ -312,15 +313,26 @@ function alpha = angle_control(x_cart, params, x_des)
 
 end
 
+% get the desired state bsaed on some desired trajectory
+function x_traj = trajectory(t_abs)
+
+    % desired position and velocity
+    vx_des = 0.5;
+    px_des = vx_des * t_abs;
+
+    % desired state
+    x_traj = [px_des; vx_des];
+end
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % GUARDS
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % guard: flight to ground
-function [value, isterminal, direction] = flight_to_ground(~, x_cart, params, x_des)
+function [value, isterminal, direction] = flight_to_ground(t, t0, x_cart, params)
 
     % get the angle of the foot
-    alpha = angle_control(x_cart, params, x_des);
+    alpha = angle_control(t0, x_cart, params);
 
     % to determine if the SLIP foot has hit the ground
     z_com = x_cart(2);
