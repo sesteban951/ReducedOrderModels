@@ -8,17 +8,18 @@ params.k = 15000;        % spring constant [N/m]
 params.m = 22;           % CoM mass (Achilles mass 22 kg)
 params.g = 9.81;         % gravity
 params.l0 = 0.5;         % spring free length (Achilles leg length 0.7 m)
-params.K = [0.03, 0.18]; % Raibert controller gain
+params.K = [0.05, 0.18]; % Raibert controller gain
 alpha_max_deg = 60;      % max foot angle from verticle [deg]
 params.alpha_max = alpha_max_deg * (pi/180);  % max foot angle [rad]
+params.v_des = 1.25;
 
 % plotting parameters
-realtime_rate = 1.0;
-n_points = 75;
+realtime_rate = 5.0;
+n_points = 50;
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-animation = 0;  % 1: animate, 0: no animation
+animation = 1;  % 1: animate, 0: no animation
 orbit = 0;      % 1: plot orbit diagram, 0: no orbit diagram
 poincare = 0;   % 1: plot poincare section, 0: no poincare section
 
@@ -32,14 +33,9 @@ tspan = 0:dt:3.0;  % to allow for switching before timeout
 % initial conditions (always start in flight)
 x0 = [0.0;   % x
       1.0;   % z
-      2.0;  % x_dot
+      0.0;   % x_dot
       0.0];  % z_dot
 domain = "flight";
-
-% desired state
-px_des = 10.0;
-vx_des = 0.0;
-x_des = [px_des; vx_des];
 
 % initial foot angle
 alpha_prev = 0;
@@ -53,21 +49,19 @@ options_poincare = odeset('Events', @(t,x)poincare_section(t, x), 'RelTol', 1e-8
 % simulate the hybrid system
 t_current = 0;
 num_transitions = 0;
-max_num_transitions = 35;
+max_num_transitions = 45;
 D = [];  % domain storage
 T = [];  % time storage
 X = [];  % state storage
+F = [];  % ground foot position storage
 T_apex = [];  % apex time storage
 X_apex = [];  % apex state storage
-F = [];  % ground foot position storage
 
 while num_transitions <= max_num_transitions
     
     % switch domains
     if domain == "flight"
         
-        disp("flight")
-
         % flight: x = [x, z, x_dot, z_dot]
         [t_flight, x_flight] = ode45(@(t,x)dynamics_f(t,x,params), tspan + t_current, x0, options_f2g);
         [~, ~, t_apex, x_apex, ~] = ode45(@(t,x)dynamics_f(t,x,params), tspan + t_current, x0, options_poincare); % purely used for poincare section
@@ -99,15 +93,13 @@ while num_transitions <= max_num_transitions
 
     elseif domain == "ground"
         
-        disp("ground")
-
         % ground: x = [r, theta, r_dot, theta_dot]
         [t_ground, x_ground] = ode45(@(t,x)dynamics_g(t,x,params), tspan + t_current, x0, options_g2f); 
 
         % convert the polar state to cartesian
         for i = 1:length(t_ground)
             x_ground(i,:) = polar_to_cart(x_ground(i,:)); % convert it to cartesian
-            x_ground(i,1) = x_ground(i,1) + p_foot(1);            % add the foot position offset
+            x_ground(i,1) = x_ground(i,1) + p_foot(1);    % add the foot position offset
         end
 
         % store the trajectory
@@ -127,12 +119,18 @@ while num_transitions <= max_num_transitions
         % set new initial condition
         x0 = x_ground(end,:);
         alpha_prev = alpha;
-        alpha = angle_control(t0, x0, params);
+        alpha = angle_control(t_current, x0, params);
     
         % define new domain
         domain = "flight";
         num_transitions = num_transitions + 1;
     end
+end
+
+% create the desired position trajectory
+P = [];
+for i = 1:length(T)
+    P = [P; trajectory(T(i), params)'];
 end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -148,9 +146,6 @@ if animation == 1
     xlabel('$p_x$ [m]', 'Interpreter', 'latex', 'FontSize', 16);
     ylabel('$p_z$ [m]', 'Interpreter', 'latex', 'FontSize', 16);
     axis equal;
-    if params.K(1) ~= 0
-        xline(px_des, '--', 'Target', 'Color', "k", 'LineWidth', 1.5);
-    end
 
     % set axis limits
     z_min = -0.1;
@@ -161,13 +156,16 @@ if animation == 1
     T = T / realtime_rate;
 
     % Number of points to record
-    com_history = [];  % Initialize an empty array to store the last 20 COM points
-    com_history_plot = [];  % Initialize a variable to store the plot handle for the history
+    com_history = [];      % Initialize an empty array to store the last 20 COM points
+    com_history_plot = []; % Initialize a variable to store the plot handle for the history
 
     tic;
     t_now = T(1);
     ind = 1;
     while t_now < T(end)
+
+        % draw the desired trajectory
+        % target = xline(P(ind,1), '--', 'Target', 'Color', "k", 'LineWidth', 1.5);
 
         % plot the foot and pole
         pole = plot([F(ind,1), X(ind,1)], [F(ind,2), X(ind,2)], 'k', 'LineWidth', 2.5);
@@ -195,8 +193,8 @@ if animation == 1
         com_history_plot = plot(com_history(:, 1), com_history(:, 2), 'g.', 'MarkerSize', 8);  % Plot history
         
         % current time
-        time = sprintf("Time = %.2f", T(ind) * realtime_rate);
-        title(time,'Interpreter','latex', 'FontSize', 16)   
+        plot_title = sprintf("Time = %.2f\n x= [%.2f, %.2f]", T(ind) * realtime_rate, X(ind,1), X(ind,3));
+        title(plot_title,'FontSize', 14)   
         
         % adjust the x_axis width
         x_min = X(ind,1) - 1.0;
@@ -215,6 +213,7 @@ if animation == 1
             break
         else
             ind = ind + 1;
+            % delete(target);
             delete(pole);
             delete(foot);
             delete(com);
@@ -229,6 +228,7 @@ if orbit == 1
     % unpack the state
     plot(X(:,2), X(:,4), 'b', 'MarkerSize', 10, 'LineWidth', 3.0);
     xline(0); yline(0);
+    title("Orbit Plot", 'FontSize', 16);
     xlabel('$z$ [m]', 'Interpreter', 'latex', 'FontSize', 16);
     ylabel('$\dot{z}$ [m/s]', 'Interpreter', 'latex', 'FontSize', 16);
 end
@@ -239,9 +239,10 @@ if poincare == 1
     hold on; grid on;
 
     % plot the poincare section
-    plot(X(:,2), X(:,3), 'k.', 'MarkerSize', 5);
+    plot(X(:,2), X(:,3), 'k--', 'MarkerSize', 5);
     plot(X_apex(:,2), X_apex(:,3), 'kx', 'MarkerSize', 15);
     xline(0); yline(0);
+    title("Apex-to-Apex", 'FontSize', 16);
     xlabel('$z$ [m]', 'Interpreter', 'latex', 'FontSize', 16);
     ylabel('$\dot{x}$ [m/s]', 'Interpreter', 'latex', 'FontSize', 16);
 end
@@ -294,7 +295,7 @@ end
 function alpha = angle_control(t_abs, x_cart, params)
     
     % unpack the desired state
-    x_des = trajectory(t_abs);
+    x_des = trajectory(t_abs, params);
     px_des = x_des(1);
     vx_des = x_des(2);
 
@@ -304,7 +305,9 @@ function alpha = angle_control(t_abs, x_cart, params)
     K_v = K(2);
 
     % compute the desired angle
-    alpha = K_p * (x_cart(1) - px_des) + K_v * (x_cart(3) - vx_des);
+    px_actual = x_cart(1);
+    vx_actual = x_cart(3);
+    alpha = K_p * (px_actual - px_des) + K_v * (vx_actual - vx_des);
 
     % clip the angle to a range
     alpha_low = -params.alpha_max;
@@ -313,12 +316,12 @@ function alpha = angle_control(t_abs, x_cart, params)
 
 end
 
-% get the desired state bsaed on some desired trajectory
-function x_traj = trajectory(t_abs)
+% get the desired state based on some desired trajectory based on absolute time
+function x_traj = trajectory(t_abs, params)
 
     % desired position and velocity
-    vx_des = 0.5;
-    px_des = vx_des * t_abs;
+    vx_des = params.v_des;
+    px_des = vx_des * t_abs; % TODO: only works for constant velocity, generalize
 
     % desired state
     x_traj = [px_des; vx_des];
@@ -329,10 +332,10 @@ end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % guard: flight to ground
-function [value, isterminal, direction] = flight_to_ground(t, t0, x_cart, params)
+function [value, isterminal, direction] = flight_to_ground(t_abs, x_cart, params)
 
     % get the angle of the foot
-    alpha = angle_control(t0, x_cart, params);
+    alpha = angle_control(t_abs, x_cart, params);
 
     % to determine if the SLIP foot has hit the ground
     z_com = x_cart(2);
