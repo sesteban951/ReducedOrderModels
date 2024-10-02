@@ -4,7 +4,6 @@
 clear all; clc; close all;
 
 % SLIP paramss
-params.k = 15000;        % spring constant [N/m]
 params.m = 22;           % CoM mass (Achilles mass 22 kg)
 params.g = 9.81;         % gravity
 params.l0 = 0.5;         % spring free length (Achilles leg length 0.7 m)
@@ -38,7 +37,7 @@ x0 = [0.0;   % x
 domain = "flight";
 
 % initial foot angle
-alpha_prev = 0;
+alpha_TO = 0;
 alpha = angle_control(0.0, x0, params);
 
 % set the switching manifolds
@@ -78,8 +77,10 @@ while num_transitions <= max_num_transitions
 
         % compute foot trajectory
         for i = 1:length(t_flight)
-            p_foot = [x_flight(i,1) + params.l0 * sin(alpha); 
-                      x_flight(i,2) - params.l0 * cos(alpha)];
+            beta = (t_flight(i) - t_flight(1)) / (t_flight(end) - t_flight(1));
+            alpha_ = (1 - beta) * alpha_TO + beta * alpha;
+            p_foot = [x_flight(i,1) + params.l0 * sin(alpha_); 
+                      x_flight(i,2) - params.l0 * cos(alpha_)];
             F = [F; p_foot'];
         end
 
@@ -95,6 +96,8 @@ while num_transitions <= max_num_transitions
         
         % ground: x = [r, theta, r_dot, theta_dot]
         [t_ground, x_ground] = ode45(@(t,x)dynamics_g(t,x,params), tspan + t_current, x0, options_g2f); 
+
+        alpha_TO = -x_ground(end,2);
 
         % convert the polar state to cartesian
         for i = 1:length(t_ground)
@@ -118,7 +121,6 @@ while num_transitions <= max_num_transitions
 
         % set new initial condition
         x0 = x_ground(end,:);
-        alpha_prev = alpha;
         alpha = angle_control(t_current, x0, params);
     
         % define new domain
@@ -193,7 +195,7 @@ if animation == 1
         com_history_plot = plot(com_history(:, 1), com_history(:, 2), 'g.', 'MarkerSize', 8);  % Plot history
         
         % current time
-        plot_title = sprintf("Time = %.2f\n x= [%.2f, %.2f]", T(ind) * realtime_rate, X(ind,1), X(ind,3));
+        plot_title = sprintf("Time: %.2f\n x= [%.2f, %.2f]", T(ind) * realtime_rate, X(ind,1), X(ind,3));
         title(plot_title,'FontSize', 14)   
         
         % adjust the x_axis width
@@ -267,13 +269,15 @@ function xdot = dynamics_f(~, x_cart, params)
 end
 
 % SLIP ground dynamics
-function xdot = dynamics_g(~, x_polar, params)
+function xdot = dynamics_g(t, x_polar, params)
     
     % unpack the system parameters
-    k = params.k;
     m = params.m;
     g = params.g;
     l0 = params.l0;
+
+    % get the spring stiffness
+    k = spring_stiffness(t, x_polar, params);
 
     % polar state, x = [r, theta, r_dot, theta_dot]
     r = x_polar(1);
@@ -291,7 +295,12 @@ end
 % CONTROL
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% control input
+% spring stiffness input
+function k = spring_stiffness(~, x_polar, params)
+    k = 15000;
+end
+
+% angle control input
 function alpha = angle_control(t_abs, x_cart, params)
     
     % unpack the desired state
