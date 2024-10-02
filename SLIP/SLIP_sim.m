@@ -13,19 +13,20 @@ params.alpha_max = alpha_max_deg * (pi/180);  % max foot angle [rad]
 params.v_des = 1.25;
 
 % plotting parameters
-realtime_rate = 5.0;
+realtime_rate = 1.0;
 n_points = 50;
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-animation = 1;  % 1: animate, 0: no animation
-orbit = 0;      % 1: plot orbit diagram, 0: no orbit diagram
-poincare = 0;   % 1: plot poincare section, 0: no poincare section
+animation = 0;     % full SLIP replay
+dom = 1;   % plot ground and flight phases
+orbit = 0;    % plot orbit plots
+poincare = 0; % plot the poincare map results
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % sim params
-freq = 250;
+freq = 200;
 dt = 1/freq;
 tspan = 0:dt:3.0;  % to allow for switching before timeout
 
@@ -37,7 +38,7 @@ x0 = [0.0;   % x
 domain = "flight";
 
 % initial foot angle
-alpha_TO = 0;
+alpha_LO = 0;
 alpha = angle_control(0.0, x0, params);
 
 % set the switching manifolds
@@ -55,6 +56,8 @@ X = [];  % state storage
 F = [];  % ground foot position storage
 T_apex = [];  % apex time storage
 X_apex = [];  % apex state storage
+T_TD = [];  % touch down times
+T_LO = [];  % lift off times
 
 while num_transitions <= max_num_transitions
     
@@ -71,6 +74,7 @@ while num_transitions <= max_num_transitions
         D = [D; 0 * ones(length(t_flight),1)];
         T = [T; t_flight];
         X = [X; x_flight];
+        T_TD = [T_TD; t_flight(end)];
   
         % udpate the current time and the intial state
         t_current = T(end);
@@ -78,7 +82,7 @@ while num_transitions <= max_num_transitions
         % compute foot trajectory
         for i = 1:length(t_flight)
             beta = (t_flight(i) - t_flight(1)) / (t_flight(end) - t_flight(1));
-            alpha_ = (1 - beta) * alpha_TO + beta * alpha;
+            alpha_ = (1 - beta) * alpha_LO + beta * alpha;
             p_foot = [x_flight(i,1) + params.l0 * sin(alpha_); 
                       x_flight(i,2) - params.l0 * cos(alpha_)];
             F = [F; p_foot'];
@@ -97,7 +101,8 @@ while num_transitions <= max_num_transitions
         % ground: x = [r, theta, r_dot, theta_dot]
         [t_ground, x_ground] = ode45(@(t,x)dynamics_g(t,x,params), tspan + t_current, x0, options_g2f); 
 
-        alpha_TO = -x_ground(end,2);
+        % save the lift off angle
+        alpha_LO = -x_ground(end,2);
 
         % convert the polar state to cartesian
         for i = 1:length(t_ground)
@@ -109,6 +114,7 @@ while num_transitions <= max_num_transitions
         D = [D; 1 * ones(length(t_ground),1)];
         T = [T; t_ground];
         X = [X; x_ground];
+        T_LO = [T_LO; t_ground(end)];
 
         % udpate the current time and the intial state
         t_current = T(end);
@@ -138,6 +144,57 @@ end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % PLOT
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+if dom == 1
+
+    % plot the domain
+    figure("Name", "Domain Plot");
+    hold on; grid on;
+
+    % plot the domain times
+    subplot(2,1,1)
+    area(T, -D+1, 'FaceColor', 'b', 'LineWidth', 2, 'FaceAlpha', 0.5);
+    title("Domain Plot", 'FontSize', 16);
+    xlabel('Time [s]', 'FontSize', 16);
+    ylabel('Domain', 'FontSize', 16);
+    yticks([0, 1]);
+
+    % touch down and lift off times
+    subplot(2,1,2)
+    hold on;
+    plot(T_TD, 'bx', 'MarkerSize', 16);
+    plot(T_LO, 'rx', 'MarkerSize', 16);
+    ylabel('TD / LO Times [s]', 'FontSize', 16);
+    xlim([0, T(end)]);
+    legend('Touch Down', 'Lift Off', 'FontSize', 16, 'Location', 'best');
+    grid on;
+end
+
+if orbit == 1
+    figure("Name", "Orbit Diagram");
+    hold on; grid on;
+
+    % unpack the state
+    plot(X(:,2), X(:,4), 'b', 'MarkerSize', 10, 'LineWidth', 3.0);
+    xline(0); yline(0);
+    title("Orbit Plot", 'FontSize', 16);
+    xlabel('$z$ [m]', 'Interpreter', 'latex', 'FontSize', 16);
+    ylabel('$\dot{z}$ [m/s]', 'Interpreter', 'latex', 'FontSize', 16);
+end
+
+if poincare == 1
+    
+    figure("Name", "Poincare Section");
+    hold on; grid on;
+
+    % plot the poincare section
+    plot(X(:,2), X(:,3), 'k--', 'MarkerSize', 5);
+    plot(X_apex(:,2), X_apex(:,3), 'kx', 'MarkerSize', 15);
+    xline(0); yline(0);
+    title("Apex-to-Apex", 'FontSize', 16);
+    xlabel('$z$ [m]', 'Interpreter', 'latex', 'FontSize', 16);
+    ylabel('$\dot{x}$ [m/s]', 'Interpreter', 'latex', 'FontSize', 16);
+end
 
 if animation == 1
 
@@ -222,33 +279,6 @@ if animation == 1
         end
     end
 end
-
-if orbit == 1
-    figure("Name", "Orbit Diagram");
-    hold on; grid on;
-
-    % unpack the state
-    plot(X(:,2), X(:,4), 'b', 'MarkerSize', 10, 'LineWidth', 3.0);
-    xline(0); yline(0);
-    title("Orbit Plot", 'FontSize', 16);
-    xlabel('$z$ [m]', 'Interpreter', 'latex', 'FontSize', 16);
-    ylabel('$\dot{z}$ [m/s]', 'Interpreter', 'latex', 'FontSize', 16);
-end
-
-if poincare == 1
-    
-    figure("Name", "Poincare Section");
-    hold on; grid on;
-
-    % plot the poincare section
-    plot(X(:,2), X(:,3), 'k--', 'MarkerSize', 5);
-    plot(X_apex(:,2), X_apex(:,3), 'kx', 'MarkerSize', 15);
-    xline(0); yline(0);
-    title("Apex-to-Apex", 'FontSize', 16);
-    xlabel('$z$ [m]', 'Interpreter', 'latex', 'FontSize', 16);
-    ylabel('$\dot{x}$ [m/s]', 'Interpreter', 'latex', 'FontSize', 16);
-end
-
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % DYNAMICS

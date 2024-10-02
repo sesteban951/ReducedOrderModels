@@ -22,7 +22,7 @@ if plot_running_params == 1
     % choose range of desired velocities
     v_min = 0.0;
     v_max = 3.0;
-    v = v_min: 0.05 :v_max;
+    v = v_min: 0.01 :v_max;
 
     % plot the cadence
     subplot(2,1,1);
@@ -31,6 +31,7 @@ if plot_running_params == 1
     xlabel('Desired Velocity [m/s]');
     ylabel('Cadence [steps/min]');
     title('Cadence vs. Desired Velocity');
+    grid on;
 
     % plot the desired stance time
     subplot(2,1,2);
@@ -39,7 +40,7 @@ if plot_running_params == 1
     xlabel('Desired Velocity [m/s]');
     ylabel('Stance Time [s]');
     title('Stance Time vs. Desired Velocity');
-
+    grid on;
 end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -58,7 +59,7 @@ function t_stance = stance_time(v_des)
 end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Apex-to-Apex Functions
+% Apex-to-Apex Dynamics Query
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
