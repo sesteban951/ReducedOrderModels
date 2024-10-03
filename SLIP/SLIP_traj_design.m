@@ -3,26 +3,34 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 clear all; clc; close all;
 
-% SLIP paramss
-params.m = 22;           % CoM mass (Achilles mass 22 kg)
-params.g = 9.81;         % gravity
-params.l0 = 0.5;         % spring free length (Achilles leg length 0.7 m)
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-plot_running_params = 0;
+plot_running_params = 1;
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % pick a desired forward velocity
-v_des = 1.5;
+v_des = 1.0;
+% t_stance_des = 0.1;
 t_stance_des = stance_time(v_des);
+disp("----------------------------------")
 
-% TEST: query apex
-x0 = [1.0, 0.0];    % pz_0, vx_0
-u0 = [0.1, 15000];  % theta, ks
-[t_stance, x_apex] = apex_return(x0, u0, params)
+% solve the non linear least squares problem
+options = optimoptions('lsqnonlin', 'MaxIterations', 500, 'MaxFunctionEvaluations', 500);
+guess = [1.5;   % pz_0 
+         0.0;    % theta
+         15];   % ks [kN/m]  
+[sol, res_norm] = lsqnonlin(@(dec_var)apex_return(dec_var) - [t_stance_des, dec_var(1), v_des], guess, [], [], options);
 
+% display the results
+res_norm
+z0_sol = sol(1)
+theta_sol = sol(2)
+ks_sol = sol(3)
+
+disp("----------------------------------")
+
+check = apex_return(sol)
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % PLOT RUNNING PARAMETERS
@@ -73,15 +81,21 @@ end
 % Apex-to-Apex Dynamics Query
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-function [t_stance, x_apex] = apex_return(x, u, params)
+function result = apex_return(input)
+
+    % SLIP params
+    params.m = 22;           % CoM mass (Achilles mass 22 kg)
+    params.g = 9.81;         % gravity
+    params.l0 = 0.5;         % spring free length (Achilles leg length 0.7 m)
 
     % unpack the apex state
-    z = x(1);
-    vx = x(2);
+    z0 = input(1);
+    vx = 1.0;
 
     % unpack the control
-    theta = u(1); % inpact angle
-    ks = u(2);    % spring stiffness
+    theta = input(2); % inpact angle
+    ks = input(3);    % spring stiffness
+    ks = ks * 1e3;    % scale the spring stiffness
 
     % sim params
     freq = 100;
@@ -90,7 +104,7 @@ function [t_stance, x_apex] = apex_return(x, u, params)
 
     % inital conditions
     x0 = [0;
-          z;
+          z0;
           vx;
           0];
     domain = "flight";
@@ -168,9 +182,14 @@ function [t_stance, x_apex] = apex_return(x, u, params)
         end
     end
 
-    t_stance = T_TD(end) - T_LO(end);
+    % stuff we care about
+    t_stance = T_LO(end) - T_TD(1)
     x_apex = X_apex(end,:);
+    z_apex = x_apex(2)
+    vx_apex = x_apex(3)
 
+    % package this into a result
+    result = [t_stance, z_apex, vx_apex];
 end
 
 % SLIP flight dynamics
