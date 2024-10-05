@@ -34,8 +34,8 @@ tspan = 0:dt:3.0;  % to allow for switching before timeout
 % initial conditions (always start in flight)
 x0 = [0.0;   % x
       1.0;   % z
-      1.5;   % x_dot
-      0.0];  % z_dot
+      1.0;   % x_dot
+      1.0];  % z_dot
 domain = "flight";
 
 % initial foot angle
@@ -50,7 +50,7 @@ options_poincare = odeset('Events', @(t,x)poincare_section(t, x), 'RelTol', 1e-8
 % simulate the hybrid system
 t_current = 0;
 num_transitions = 0;
-max_num_transitions = 30;
+max_num_transitions = 1;
 D = [];  % domain storage
 T = [];  % time storage
 X = [];  % state storage
@@ -377,7 +377,10 @@ end
 function [value, isterminal, direction] = flight_to_ground(t_abs, x_cart, params)
 
     % get the angle of the foot
-    alpha = angle_control(t_abs, x_cart, params);
+    alpha = angle_control(t_abs, x_cart, params);  % TODO: This is causing some error in px because we're 
+                                                   %       doing conitnuos control over flight which is wrong.
+                                                   %       We should only be deciding the angle once at the apex!!!!!!
+                                                   %       In practice you should be doing this for sure.
 
     % to determine if the SLIP foot has hit the ground
     z_com = x_cart(2);

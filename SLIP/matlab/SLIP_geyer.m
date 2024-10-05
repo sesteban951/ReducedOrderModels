@@ -19,25 +19,41 @@ x0_cart = [0.0;   % px
            1.0;   % vx
            1.0];  % vz
 
+% inital impact angle
+alpha = angle_control(x0_cart, params);
+
 % flight phase
 tic;
 [tspan_f, x_flight] = SLIP_flight(x0_cart, params);
 msg = ['Time to compute flight phase dynamics: ', num2str(toc), ' seconds'];
 disp(msg);
 
-% plot(x_flight(:,1), x_flight(:,2), 'b.');
-plot(x_flight(:,4), 'b.')
+% compute the foot position at impact
+px_foot = x_flight(end,1) + params.l0 * cos(alpha);
 
-% % convert to polar coordinates
-% x0 = x_flight(end,:);
-% x0_polar = cart_to_polar(x0, params);
+% convert to polar coordinates
+x0_flight = x_flight(end,:);
+x0_polar = cart_to_polar(x0_flight, alpha, params);
 
-% % forward prop the ground phase
-% tic;
-% [tspan_g, x_ground] = SLIP_ground(x0_polar, params);
-% msg = ['Time to compute ground phase dynamics: ', num2str(toc), ' seconds'];
-% disp(msg);
-% tspan_g(end)
+% forward prop the ground phase
+tic;
+[tspan_g, x_ground] = SLIP_ground(x0_polar, params);
+msg = ['Time to compute ground phase dynamics: ', num2str(toc), ' seconds'];
+disp(msg);
+for i = 1:length(tspan_g)
+    x_cart = polar_to_cart(x_ground(i,:), params);
+    x_ground(i,:) = x_cart;
+    x_ground(i,1) = x_ground(i,1) + px_foot;
+end
+
+% plot
+X = [x_flight; x_ground];
+plot(X(:,1), X(:,2), 'k', 'LineWidth', 2);
+xlabel('x'); ylabel('z');
+yline(0)
+title('SLIP Geyer Model');
+axis equal;
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % GEYER'S MODEL
@@ -73,12 +89,13 @@ function [tspan, x_polar] = SLIP_ground(x0_polar, params)
 
     % compute the total stance phase time
     ts = (1  /omega_hat) * (pi + 2 * atan2((g - l0*phi_dot^2), (abs(r_dot)*omega_hat)));
-    tspan = 0: dt : ts;
-    tspan(end) = ts;
+    tspan = linspace(0, ts, ts/dt + 1);
 
     % get the radial solution, r(t) and phi(t)
     R = zeros(length(tspan),1);
     Phi = zeros(length(tspan),1);
+    Rdot = zeros(length(tspan),1);
+    Phidot = zeros(length(tspan),1);
     for i = 1:length(tspan)
         
         % current time
@@ -93,12 +110,6 @@ function [tspan, x_polar] = SLIP_ground(x0_polar, params)
         term2 = (phi_dot^2 - g/l0) * sin(omega_hat*t) / omega_hat^2 + abs(r_dot) * (1 - cos(omega_hat*t)) / (omega_hat * l0);
         phi_t = pi - alpha + term1 * phi_dot * t + (2*phi_dot / omega_hat) * term2;
         Phi(i) = phi_t;
-    end
-
-    % compute r_dot(t) and phi_dot(t)
-    Rdot = zeros(length(tspan),1);
-    Phidot = zeros(length(tspan),1);
-    for i = 1:length(tspan)
 
         % compute the radial rate (Differentiate Eq. 12)
         rdot_t = l0 * b * cos(omega_hat * t) * omega_hat;
@@ -115,7 +126,7 @@ function [tspan, x_polar] = SLIP_ground(x0_polar, params)
 end
 
 % closed form solution of the flight dynamics
-function [tspan, X] = SLIP_flight(x0_cart, params)
+function [tspan, x_cart] = SLIP_flight(x0_cart, params)
 
     % unpack params
     g = params.g;
@@ -129,18 +140,19 @@ function [tspan, X] = SLIP_flight(x0_cart, params)
     zdot0 = x0_cart(4);
 
     % compute the impact angle
-    alpha = angle_control(x0_cart, params);
+    alpha = angle_control(x0_cart, params)
 
     % compute the flight time
     zf = l0 * sin(alpha);
     tf_sols = roots([-0.5 * g, zdot0, z0 - zf]);
     tf = max(tf_sols);
-    tspan = 0 : dt : tf;
-    tspan(end) = tf + 0.02;
+    tspan = linspace(0, tf, tf/dt + 1);
 
     % compute the projectile motion
     px = zeros(length(tspan),1);
     pz = zeros(length(tspan),1);
+    vx = zeros(length(tspan),1);
+    vz = zeros(length(tspan),1);
     for i = 1:length(tspan)
         
         % get the current time
@@ -149,17 +161,18 @@ function [tspan, X] = SLIP_flight(x0_cart, params)
         % compute the positions
         x_t = x0 + xdot0 * t;
         z_t = z0 + zdot0 * t - 0.5 * g * t^2;
-
         px(i) = x_t;
         pz(i) = z_t;
+
+        % compute the velocities
+        vx_t = xdot0;
+        vz_t = zdot0 - g * t;
+        vx(i) = vx_t;
+        vz(i) = vz_t;
     end
 
-    % set the velocities
-    vx = xdot0 * ones(length(tspan),1);
-    vz = (zdot0 - g * tspan)';
-
     % pack the state
-    X = [px, pz, vx, vz];
+    x_cart = [px, pz, vx, vz];
 end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -190,14 +203,11 @@ end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % cartesian to polar (Eq. 24)
-function x_polar = cart_to_polar(x_cart, params)
+function x_polar = cart_to_polar(x_cart, alpha, params)
     
     % unpack the cartesian state
     vx = x_cart(3);
     vz = x_cart(4);
-
-    % get the attack angle
-    alpha = angle_control(x_cart, params);
 
     % convert to polar
     r = params.l0;
@@ -215,11 +225,14 @@ function x_cart = polar_to_cart(x_polar, params)
     % unpack the polar state
     r = x_polar(1);
     phi = x_polar(2);
+    r_dot = x_polar(3);
+    phi_dot = x_polar(4);
 
     % convert to cartesian
     px = r * cos(phi);
     pz = r * sin(phi);
+    vx = r_dot * cos(phi) - r * phi_dot * sin(phi);
+    vz = r_dot * sin(phi) + r * phi_dot * cos(phi);
 
-    x_cart = [px, pz];
-
+    x_cart = [px, pz, vx, vz];
 end
