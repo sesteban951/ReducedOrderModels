@@ -9,7 +9,7 @@ params.g = 9.81;         % gravity
 params.l0 = 0.5;         % spring free length (Achilles leg length 0.7 m)
 params.k = 15000;        % spring stiffness (Achilles 82000 N/m)
 params.K = [0.05, 0.17]; % Raibert controller gains
-params.dt = 0.005;       % time step
+params.dt = 0.001;       % time step
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -26,7 +26,6 @@ alpha = angle_control(x0_cart, params);
 tic;
 [tspan_f, x_flight] = SLIP_flight(x0_cart, params);
 msg = ['Time to compute flight phase dynamics: ', num2str(toc), ' seconds'];
-disp(msg);
 
 % compute the foot position at impact
 px_foot = x_flight(end,1) + params.l0 * cos(alpha);
@@ -36,10 +35,9 @@ x0_flight = x_flight(end,:);
 x0_polar = cart_to_polar(x0_flight, alpha, params);
 
 % forward prop the ground phase
-tic;
 [tspan_g, x_ground] = SLIP_ground(x0_polar, params);
-msg = ['Time to compute ground phase dynamics: ', num2str(toc), ' seconds'];
-disp(msg);
+
+% conert the polar coordinaates to cartesian
 for i = 1:length(tspan_g)
     x_cart = polar_to_cart(x_ground(i,:), params);
     x_ground(i,:) = x_cart;
@@ -53,7 +51,6 @@ xlabel('x'); ylabel('z');
 yline(0)
 title('SLIP Geyer Model');
 axis equal;
-
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % GEYER'S MODEL
@@ -113,7 +110,7 @@ function [tspan, x_polar] = SLIP_ground(x0_polar, params)
 
         % compute the radial rate (Differentiate Eq. 12)
         rdot_t = l0 * b * cos(omega_hat * t) * omega_hat;
-        Rdot(i) = rdot_t;
+        Rdot(i) = -rdot_t;
 
         % compute the angular rate (Eq. 16)
         rho_t = (R(i) - l0) / l0;
