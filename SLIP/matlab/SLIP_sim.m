@@ -7,10 +7,14 @@ clear all; clc; close all;
 params.m = 22;           % CoM mass (Achilles mass 22 kg)
 params.g = 9.81;         % gravity
 params.l0 = 0.5;         % spring free length (Achilles leg length 0.7 m)
-params.K = [0.05, 0.18]; % Raibert controller gain
+params.K = [0.03, 0.18]; % Raibert controller gain
 alpha_max_deg = 60;      % max foot angle from verticle [deg]
 params.alpha_max = alpha_max_deg * (pi/180);  % max foot angle [rad]
-params.v_des = 1.5;
+
+% trajectory parameters
+params.traj_type = "pos"; % "pos" for constant velocity and "vel" for constant position 
+params.v_des = 1.5;       % converge to a fixed velocity
+params.p_des = 2.0;       % converge to a fixed position
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -18,7 +22,8 @@ animation = 1;     % full SLIP replay
 
 % plotting parameters
 realtime_rate = 1.0;
-n_points = 60;
+n_points = 50;
+max_num_transitions = 60;
 
 dom = 0;   % plot ground and flight phases
 orbit = 0;    % plot orbit plots
@@ -35,7 +40,7 @@ tspan = 0:dt:3.0;  % to allow for switching before timeout
 x0 = [0.0;   % x
       1.0;   % z
       1.0;   % x_dot
-      1.0];  % z_dot
+      0.0];  % z_dot
 domain = "flight";
 
 % initial foot angle
@@ -43,14 +48,12 @@ alpha_LO = 0;
 alpha = angle_control(0.0, x0, params);
 
 % set the switching manifolds
-options_f2g = odeset('Events', @(t,x)flight_to_ground(t, x, params), 'RelTol', 1e-8, 'AbsTol', 1e-9);
 options_g2f = odeset('Events', @(t,x)ground_to_flight(t, x, params), 'RelTol', 1e-8, 'AbsTol', 1e-9);
 options_poincare = odeset('Events', @(t,x)poincare_section(t, x), 'RelTol', 1e-8, 'AbsTol', 1e-9);
 
 % simulate the hybrid system
 t_current = 0;
 num_transitions = 0;
-max_num_transitions = 1;
 D = [];  % domain storage
 T = [];  % time storage
 X = [];  % state storage
@@ -65,7 +68,10 @@ while num_transitions <= max_num_transitions
     
     % switch domains
     if domain == "flight"
-        
+
+        % set the options with the appropitate alpha
+        options_f2g = odeset('Events', @(t,x)flight_to_ground(t, x, alpha, params), 'RelTol', 1e-8, 'AbsTol', 1e-9);
+
         % flight: x = [x, z, x_dot, z_dot]
         [t_flight, x_flight] = ode45(@(t,x)dynamics_f(t,x,params), tspan + t_current, x0, options_f2g);
         [~, ~, t_apex, x_apex, ~] = ode45(@(t,x)dynamics_f(t,x,params), tspan + t_current, x0, options_poincare); % purely used for poincare section
@@ -139,12 +145,6 @@ end
 msg = "Time to simulate the SLIP model: " + string(toc) + " seconds";
 disp(msg);
 
-% create the desired position trajectory
-P = [];
-for i = 1:length(T)
-    P = [P; trajectory(T(i), params)'];
-end
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % PLOT
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -215,6 +215,12 @@ if animation == 1
     z_max = max(X(:,2)) + 0.1;
     ylim([z_min, z_max]);
 
+
+    % draw the desired trajectory
+    if params.traj_type == "pos"
+        target = xline(params.p_des, '--', 'Target', 'Color', "k", 'LineWidth', 1.5);
+    end
+
     % scale time for animation
     T = T / realtime_rate;
 
@@ -226,9 +232,6 @@ if animation == 1
     t_now = T(1);
     ind = 1;
     while t_now < T(end)
-
-        % draw the desired trajectory
-        % target = xline(P(ind,1), '--', 'Target', 'Color', "k", 'LineWidth', 1.5);
 
         % plot the foot and pole
         pole = plot([F(ind,1), X(ind,1)], [F(ind,2), X(ind,2)], 'k', 'LineWidth', 2.5);
@@ -362,8 +365,13 @@ end
 function x_traj = trajectory(t_abs, params)
 
     % desired position and velocity
-    vx_des = params.v_des;
-    px_des = vx_des * t_abs; % TODO: only works for constant velocity, generalize
+    if params.traj_type == "pos"
+        px_des = params.p_des;
+        vx_des = 0;
+    elseif params.traj_type == "vel"
+        vx_des = params.v_des;
+        px_des = vx_des * t_abs; % TODO: only works for constant velocity, generalize
+    end
 
     % desired state
     x_traj = [px_des; vx_des];
@@ -374,13 +382,7 @@ end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % guard: flight to ground
-function [value, isterminal, direction] = flight_to_ground(t_abs, x_cart, params)
-
-    % get the angle of the foot
-    alpha = angle_control(t_abs, x_cart, params);  % TODO: This is causing some error in px because we're 
-                                                   %       doing conitnuos control over flight which is wrong.
-                                                   %       We should only be deciding the angle once at the apex!!!!!!
-                                                   %       In practice you should be doing this for sure.
+function [value, isterminal, direction] = flight_to_ground(t_abs, x_cart, alpha, params)
 
     % to determine if the SLIP foot has hit the ground
     z_com = x_cart(2);
