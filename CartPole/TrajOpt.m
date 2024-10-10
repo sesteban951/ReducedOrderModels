@@ -1,29 +1,63 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% CART POLE Multiple-Shooting Trajectory Optimization w/ CasADi
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 clear all; close all; clc; 
 
 % import casadi
 import casadi.*
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% System Parameters
+params.mc = 1;   % Mass of the cart
+params.mp = 0.2; % Mass of the pole
+params.g = 9.81; % Gravity
+params.l = 0.5;  % Length of the pole
+
+% instatiate the solver parameters
+T = 15;  % total time horizon
+N = 300; % total number of nodes
+
+% quadratic weights
+Q = diag([1, 30, 1, 1]); % state weights
+R = 1;                   % control weights
+
+% bounds on the state for all time steps
+x0 = [0;  % cart pos
+      0;  % pole angle
+      0;  % cart vel
+      0]; % pole angular vel
+xd = [0;  % cart pos
+      pi;  % pole angle
+      0;  % cart vel
+      0]; % pole angular vel
+x_min = [-inf; -inf; -inf; -inf];  
+x_max = [ inf;  inf;  inf;  inf];
+u_min = -200;
+u_max =  200;
+
+% overall options
+dyn_integrator = 'idas'; % integrator type
+nlp_solver = 'ipopt';   % nlp solver type
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % Define the state and control variables
 x = SX.sym('x',4); % state of the cart-pole
 u = SX.sym('u');   % control input
 
 % Define the continuous time dynamics
-xdot = cartpole_dynamics(x, u);
+xdot = cartpole_dynamics(x, u, params);
 
 % Define the objective function
-L = objective_function(x, u);
-
-% Continuous time dynamics function
-f = Function('f', {x, u}, {xdot, L});
+L = objective_function(x, u, xd, Q, R);
 
 % Create an integrator function
-T = 10;
-N = 200;
-dae = struct('x', x, 'p', u, 'ode', xdot, 'quad', L);
-op = struct('tf', T/N, 'abstol', 1e-8); % integrator options
-F = integrator('F', 'idas', dae, op);   % use the IDAS integrator
+dyn = struct('x', x, 'p', u, 'ode', xdot, 'quad', L); % instantiate the dynamics
+op = struct('tf', T/N, 'abstol', 1e-8);               % integrator options
+F = integrator('F', dyn_integrator, dyn, op);         % use the IDAS integrator
 
-% Start with an empty NLP
+% Start with empty NLP constraints
 w = {};
 G = {};
 J = 0;
@@ -35,8 +69,8 @@ ubg = [];
 % Initial conditions
 Xk = MX.sym('X0', 4);
 w{end+1} = Xk;
-lbw = [lbw; 0.5; 0; 0; 0];  % initial state
-ubw = [ubw; 0.5; 0; 0; 0];  % initial state
+lbw = [lbw; x0];  % initial state
+ubw = [ubw; x0];  % initial state
 
 % Do it for the entire horizon
 for k = 1:N
@@ -44,8 +78,8 @@ for k = 1:N
     % Local control
     Uk = MX.sym(['U' num2str(k-1)]);
     w{end+1} = Uk;
-    lbw = [lbw; -200]; % lower bound on the control
-    ubw = [ubw; 200];  % upper bound on the control
+    lbw = [lbw; u_min]; % lower bound on the control
+    ubw = [ubw; u_max];  % upper bound on the control
 
     % Call the integrator function 
     Fk = F('x0', Xk, 'p', Uk);
@@ -55,8 +89,8 @@ for k = 1:N
     % Local state at the next step
     Xk = MX.sym(['X' num2str(k)], 4);
     w{end+1} = Xk;
-    lbw = [lbw; -inf; -inf; -inf; -inf]; % lower bounds on state
-    ubw = [ubw; inf; inf; inf; inf];     % upper bounds on state
+    lbw = [lbw; x_min]; % lower bounds on state
+    ubw = [ubw; x_max];     % upper bounds on state
 
     % Dynamics constraint: Xk_end = Xk
     G{end+1} = Xk_end - Xk; 
@@ -65,54 +99,54 @@ end
 % Create an NLP solver function
 nlp = struct('x', vertcat(w{:}),...
              'f', J, 'g', vertcat(G{:}));
-solver = nlpsol('solver', 'ipopt', nlp);
+solver = nlpsol('solver', nlp_solver, nlp);
 
 % Set solver options
-opts = struct('print_time', 1, 'ipopt', struct('print_level', 0));
+opts = struct('print_time', 1, nlp_solver, struct('print_level', 0));
 sol = solver('lbx', lbw, 'ubx', ubw, 'lbg', lbg, 'ubg', ubg);
 
 % extract the state solution
 x_opt = full(sol.x);
-x1 = x_opt(1:5:end);
-x2 = x_opt(2:5:end);
-x3 = x_opt(3:5:end);
-x4 = x_opt(4:5:end);
-u = x_opt(5:5:end);
+p = x_opt(1:5:end);      % cart position
+th = x_opt(2:5:end);     % pole angle
+pdot = x_opt(3:5:end);  % cart velocity
+thdot = x_opt(4:5:end); % pole angular velocity
+u = x_opt(5:5:end);      % control input
+
+% save the data into csv files
+X = [p, th, pdot, thdot];
+U = u;
+T = linspace(0, T, N+1)';
+
+csvwrite('data/state_data.csv', X);
+csvwrite('data/input_data.csv', U);
+csvwrite('data/time_data.csv', T);
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % DYNAMICS
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Dynamics taken from https://underactuated.mit.edu/acrobot.html#cart_pole
 
-function L = objective_function(x, u)
-    
-    % desired states
-    x1_des = 0;  % cart position
-    x2_des = pi;  % pole angle
-    x3_des = 0;  % cart velocity
-    x4_des = 0;  % pole angular velocity
-    
-    % least squares cost
-    Qx = diag([1, 30, 1, 1]);
-    Qu = 1;
+% least squares loss
+function L = objective_function(x, u, xd, Q, R)
 
     % least sqaure objective function
-    e = [x(1) - x1_des;
-         x(2) - x2_des;
-         x(3) - x3_des;
-         x(4) - x4_des];
-    L = e'*Qx*e + u'*Qu*u;
+    e = [x(1) - xd(1);
+         x(2) - xd(2);
+         x(3) - xd(3);
+         x(4) - xd(4)];
+    L = e' * Q * e + u' * R * u;
 end
 
-function xdot = cartpole_dynamics(x, u)
+% Dynamics taken from https://underactuated.mit.edu/acrobot.html#cart_pole
+function xdot = cartpole_dynamics(x, u, params)
 
-    % Constants
-    mc = 1; % Mass of the cart
-    mp = 0.2; % Mass of the pole
-    g = 9.81; % Gravity
-    l = 0.5; % Length of the pole
+    % system parameters
+    mc = params.mc;
+    mp = params.mp;
+    g = params.g;
+    l = params.l;
 
-    % compute the accelerations
+    % the dynamics
     xdot = [x(3);
             x(4);
             1/(mc + mp*sin(x(2))^2) * (u + mp*sin(x(2))*(l*x(4)^2 + g*cos(x(2))));
