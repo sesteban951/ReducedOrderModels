@@ -87,13 +87,13 @@ u = x_opt(5:5:end);
 function L = objective_function(x, u)
     
     % desired states
-    x1_des = 5;  % cart position
-    x2_des = 0;  % pole angle
+    x1_des = 0;  % cart position
+    x2_des = pi;  % pole angle
     x3_des = 0;  % cart velocity
     x4_des = 0;  % pole angular velocity
     
     % least squares cost
-    Qx = diag([1, 1, 1, 1]);
+    Qx = diag([1, 30, 1, 1]);
     Qu = 1;
 
     % least sqaure objective function
