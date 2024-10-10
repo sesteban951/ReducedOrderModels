@@ -15,26 +15,26 @@ params.g = 9.81; % Gravity
 params.l = 0.5;  % Length of the pole
 
 % instatiate the solver parameters
-T = 15;  % total time horizon
-N = 300; % total number of nodes
+T = 8;  % total time horizon
+N = 200; % total number of nodes
 
 % quadratic weights
-Q = diag([1, 30, 1, 1]); % state weights
+Q = diag([1, 50, 1, 1]); % state weights
 R = 1;                   % control weights
 
 % bounds on the state for all time steps
 x0 = [0;  % cart pos
-      0;  % pole angle
+      0.05*pi;  % pole angle
       0;  % cart vel
       0]; % pole angular vel
 xd = [0;  % cart pos
       pi;  % pole angle
       0;  % cart vel
       0]; % pole angular vel
-x_min = [-inf; -inf; -inf; -inf];  
-x_max = [ inf;  inf;  inf;  inf];
-u_min = -200;
-u_max =  200;
+x_min = [-3; -inf; -inf; -inf];  
+x_max = [ 3;  inf;  inf;  inf];
+u_min = -5;
+u_max =  5;
 
 % overall options
 dyn_integrator = 'idas'; % integrator type
@@ -129,9 +129,9 @@ csvwrite('data/time_data.csv', T);
 % least squares loss
 function L = objective_function(x, u, xd, Q, R)
 
-    % least sqaure objective function
+    % least square objective function
     e = [x(1) - xd(1);
-         x(2) - xd(2);
+         cos(x(2)) + 1;
          x(3) - xd(3);
          x(4) - xd(4)];
     L = e' * Q * e + u' * R * u;

@@ -13,8 +13,8 @@ time = time_data;
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-plot_states = 1;
-animation = 0;
+plot_states = 0;
+animation = 1;
 
 realtime_rate = 1.0;
 
@@ -28,8 +28,10 @@ orange = [1, 0.5, 0];
 l = 0.5; 
 
 % select time range
-t0 = 0;
-tf = 7.0;
+t0 = time_data(1);
+tf = time_data(end);
+% t0 = 0.0;
+% tf = 7.8;
 
 % find the indices for the selected time range
 idx = find(time >= t0 & time <= tf);
@@ -50,8 +52,7 @@ omega = state_data(:,4); % pole angular velocity
 omega = omega(idx);
 
 % extract the control inputs
-force = control_data(idx);
-force = force(idx);
+force = control_data(idx(1:end-1));
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -98,7 +99,7 @@ if animation == 1
     xline(0); yline(0);
     xlabel('x [m]'); ylabel('y [m]');
     x_lims = [min(pos) - 0.25, max(pos) + 0.25];
-    y_lims = [-0.2, l + 0.2];
+    y_lims = [-l-0.1, l + 0.2];
     xlim(x_lims); ylim(y_lims);
 
     % scale the time date to speed up or slow down the animation
@@ -119,6 +120,7 @@ if animation == 1
 
         % draw the cart
         cart = rectangle('Position', [cart_pos(1)-0.1, cart_pos(2)-0.05, 0.2, 0.1], 'Curvature', 0.1, 'FaceColor', gray);
+        pole_base = plot(cart_pos(1), cart_pos(2), 'ko', 'LineWidth', 2, 'MarkerFaceColor', 'k');
 
         % draw pole
         pole = plot([cart_pos(1), pole_pos(1)], [cart_pos(2), pole_pos(2)], 'k', 'LineWidth', 2);
@@ -143,6 +145,7 @@ if animation == 1
             ind = ind + 1;
 
             delete(cart)
+            delete(pole_base)
             delete(pole)
             delete(ball)
         end
