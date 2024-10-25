@@ -28,10 +28,10 @@ orange = [1, 0.5, 0];
 l = 0.5; 
 
 % select time range
-t0 = time_data(1);
-tf = time_data(end);
-% t0 = 0.0;
-% tf = 7.8;
+% t0 = time_data(1);
+% tf = time_data(end);
+t0 = 0.0;
+tf = 7.8;
 
 % find the indices for the selected time range
 idx = find(time >= t0 & time <= tf);
@@ -52,7 +52,7 @@ omega = state_data(:,4); % pole angular velocity
 omega = omega(idx);
 
 % extract the control inputs
-force = control_data(idx(1:end-1));
+force = control_data(idx(1:end));
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
