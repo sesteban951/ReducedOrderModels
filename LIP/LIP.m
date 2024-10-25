@@ -3,6 +3,9 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 close all; clc; clear all;
 
+% choose to save video
+save_video = 1;
+
 % LIP parameters
 params.g = 9.81;                % gravity
 params.z0 = 0.5;                  % constant height
@@ -22,7 +25,7 @@ params.beta =  1;
 x0 = [0.1;-0.1];
 
 % simulation parameters
-dt = 0.02;
+dt = 0.01;
 tspan = 0:dt:params.T;
 n_steps = 10;
 
@@ -66,7 +69,7 @@ end
 
 % animate the gait
 time_scale = 0.75;
-animate(X,B,U,T,params,time_scale)
+animate(X,B,U,T,params,time_scale,save_video)
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % AUXILLARY FUNCTIONS
@@ -120,8 +123,7 @@ function c = coeff(t, i, n)
     c = nchoosek(n, i) * t^i * (1 - t)^(n - i);
 end
 
-% animate the LIP
-function animate(X,B,U,tspan,params,time_scale)
+function animate(X,B,U,tspan,params,time_scale, save_video)
     % figure settings
     figure;
     xline(0); yline(0);
@@ -130,7 +132,14 @@ function animate(X,B,U,tspan,params,time_scale)
     xlim([min(U(:,1))*1.2, max(U(:,1))*1.2]);
     ylim([0, params.z0*1.2]);
     axis equal; grid on; hold on;
-%     set(gcf, 'Position', get(0, 'Screensize'));
+    
+    % initialize video writer if save_video is true
+    if save_video
+        video_filename = 'LIP_animation.avi';  % Specify your filename here
+        video_writer = VideoWriter(video_filename);
+        video_writer.FrameRate = 30;  % Set frame rate (adjust as needed)
+        open(video_writer);  % Open the video file for writing
+    end
     
     % animate the plot
     tic
@@ -140,37 +149,50 @@ function animate(X,B,U,tspan,params,time_scale)
     while t_now < tspan(end)
         
         % break if went passed max tspan
-        if i==length(tspan)
+        if i == length(tspan)
             break
         end
 
         % find current time
         t_now = toc;
-        i = find(tspan>t_now,1);
+        i = find(tspan > t_now, 1);
         
         % draw legs
-        sl = plot([0,X(i,1)],[0,params.z0],'b');      % stance leg
-        sw = plot([X(i,1),B(i,1)],[params.z0,B(i,2)],'--','Color',[.1 .1 .1]); % swing leg
+        sl = plot([0,X(i,1)], [0,params.z0], 'k', 'LineWidth', 2.0);      % stance leg
+        sw = plot([X(i,1),B(i,1)], [params.z0,B(i,2)], '--', 'Color', [.1 .1 .1], 'LineWidth', 2.0); % swing leg
 
         % draw points
-        CoM = plot(X(i,1),params.z0,'.k','MarkerSize',50); % CoM
-        sf =  plot(0,0,'.b','MarkerSize',20);              % stance foot
-        b  =  plot(B(i,1),B(i,2),'.k','MarkerSize',20);    % swing  foot
-        fpt = plot(U(i),0,'xr','MarkerSize',20);           % foot placement target
+        orange_rgb = [1, 0.5, 0];
+        CoM = plot(X(i,1), params.z0, 'ok', 'MarkerSize', 30, 'MarkerFaceColor', orange_rgb, 'LineWidth', 2.0); % CoM
+        sf = plot(0, 0, '.b', 'MarkerSize', 40);              % stance foot
+        b = plot(B(i,1), B(i,2), '.k', 'MarkerSize', 20);     % swing foot
+        fpt = plot(U(i), 0, 'xr', 'MarkerSize', 20, 'LineWidth', 2.0);  % foot placement target
         
+        % update title
         txt = sprintf("Time: %.3f \n $p =$  %.3f \n $v =$ %.3f", ...
-                      tspan(i)*time_scale,X(i,1),X(i,2));
-        title(txt,'Interpreter','latex','FontSize',15)
+                      tspan(i) * time_scale, X(i,1), X(i,2));
+        title(txt, 'Interpreter', 'latex', 'FontSize', 15);
         
-        drawnow
+        drawnow;
 
-        % remove stuff from from plot
-        cleanPlot = [sl,sw,CoM, sf, fpt,b];
+        % capture frame for video if save_video is true
+        if save_video
+            frame = getframe(gcf);  % Capture the current figure as a frame
+            writeVideo(video_writer, frame);  % Write the frame to the video
+        end
+
+        % remove stuff from plot
+        cleanPlot = [sl, sw, CoM, sf, fpt, b];
         
         % do not clean plot if last time point
-        if i~=length(tspan)
+        if i ~= length(tspan)
             delete(cleanPlot);
         end
+    end
+
+    % close the video writer if it was opened
+    if save_video
+        close(video_writer);  % Finalize and save the video file
     end
 end
 
