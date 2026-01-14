@@ -36,7 +36,7 @@ params.use_ankle_torque = 0;  % use ankle torque for control (0 or 1)
 % initial state
 t0 = 0;
 x0 = [0.25;       % p, position of the COM relative to stance
-      0.0];      % L, angular momentum about stance
+      0.1];      % L, angular momentum about stance
 p_stance = 0.0;  % initial position of the stance foot
 
 % simulation time
