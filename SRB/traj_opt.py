@@ -65,29 +65,60 @@ def f_cont(self, x, u):
     I = ca.diag(ca.DM([0.25, 0.25, 0.50]))  # inertia matrix [kg*m^2]
     
     # extract the state
-    p_com = x[0:3]    # position
-    theta = x[3:6]    # euler angles
-    v_com = x[6:9]    # linear velocity
-    w_body = x[9:12]  # angular velocity
+    p_com = x[0:3]    # position in world frame
+    theta = x[3:6]    # euler angles (roll, pitch, yaw) in world frame
+    v_com = x[6:9]    # linear velocity in world frame
+    w_body = x[9:12]  # angular velocity in body frame
 
     # extract the inputs
-    f_left =  u[0:3]  # control torques
-    f_right = u[3:6]  # control torques
+    f_left =  u[0:3]  # control forces  in world frame
+    f_right = u[3:6]  # control torques in world frame
 
     # extract the euler angles (world frame)
-    r = theta[0]
-    p = theta[1]
-    y = theta[2]
+    r = theta[0]  # roll
+    p = theta[1]  # pitch
+    y = theta[2]  # yaw
 
     # create the rotation matrix from body to world frame
-    R = euler_to_rotmat(r, p, y)
+    R = euler_to_rotmat(r, p, y) 
 
-    # precompute sines and cosines
+    # body angular velocity to euler angular rates
     cr, sr = ca.cos(r), ca.sin(r)
     cp, sp = ca.cos(p), ca.sin(p)
+    T = ca.vertcat(
+        ca.horzcat(1, sr*sp/cp, cr*sp/cp),
+        ca.horzcat(0,       cr,      -sr),
+        ca.horzcat(0,    sr/cp,    cr/cp),
+    )
+    theta_dot = T @ w_body
 
+    # net force
+    p_left = ca.DM([-0.5, 0.0, 0.0])   # left foot position in world frame
+    p_right = ca.DM([0.5, 0.0, 0.0])   # right foot position in world frame
 
+    F_net = f_left + f_right
+    M_net = skew(p_left - p_com) @ f_left + skew(p_right - p_com) @ f_right
 
+    # translational dynamics
+    g_vec = ca.vertcat([0.0, 0.0, -g])
+    p_dot = v_com
+    v_dot = (1/m) * F_net + g_vec
+
+    # rotational dynamics
+    M_body = R.T @ M_net
+
+    # w_dot = I^{-1} * (M_body - w_body x (I * w_body))
+    w_dot = ca.solve(I, (M_body - skew(w_body)) @ (I @ w_body))
+
+    # build dynamics vector
+    x_dot = ca.vertcat(
+        p_dot,
+        theta_dot,
+        v_dot,
+        w_dot,
+    )
+
+    return x_dot
 
 
 
