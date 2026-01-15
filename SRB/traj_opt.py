@@ -12,6 +12,8 @@ from dataclasses import dataclass
 import casadi as ca
 
 ##############################################################
+# Single Rigid Body Dynamics
+##############################################################
 
 class SRBDynamics:
 
@@ -23,7 +25,7 @@ class SRBDynamics:
         self.nv = 6  # [v_com, w_body]
 
         # input dimension
-        self.nu = 6   # [f_left, f_right]
+        self.nu = 12   # [f_left, f_right, p_left, p_right]
 
     # SRB model continuous dynamics
     # https://arxiv.org/pdf/2207.04163
@@ -144,8 +146,80 @@ class SRBDynamics:
 
         return R
 
+##############################################################
+# Cost Functions
+##############################################################
+
+# running cost
+def running_cost(x, u, x_goal):
+
+    # simple quadratic 
+    w_pos = 10.0
+    w_ori = 10.0
+    w_vel = 1.0
+    w_omega = 1.0
+    Qx = ca.diag(ca.vertcat(
+        w_pos, w_pos, w_pos,        # p_com
+        w_ori, w_ori, w_ori, w_ori, # quaternion # TODO: consider orientation error differently
+        w_vel, w_vel, w_vel,        # v_com
+        w_omega, w_omega, w_omega   # w_body
+    ))
+    
+    # penalize forces and positions
+    w_force = 0.1
+    
+
+
+
+
+
 
 
 ##############################################################
+# Trajectory Optimization
+##############################################################
+
+# create the dynamics object
+srb = SRBDynamics()
+f = srb.f_disc
+nq = srb.nq
+nv = srb.nv
+nx = nq + nv
+nu = srb.nu
+
+# optimization settings
+dt = 0.01        # time step
+T = 5.0          # total time
+N = int(T / dt)  # number of intervals
+
+# make the optimizer
+opti = ca.Opti()
+
+# horizon variables
+X = opti.variable(nx, N + 1)  # states over the horizon
+U = opti.variable(nu, N)      # inputs over the horizon
+
+# initial condition
+x0 = np.array([0, 0, 1.0,  # p_com
+               1, 0, 0, 0, # quaternion
+               0, 0, 0,    # v_com
+               0, 0, 0])   # w_body
+
+# desired goal state
+x_goal = np.array([1.0, 0, 0.5, # p_com
+                   0.707, 0, 0.707, 0,  # quaternion
+                   0, 0, 0,     # v_com
+                   0, 0, 0])    # w_body
+
+# set the initial condition 
+opti.subject_to(X[:, 0] == x0)
+
+# set the final condition
+opti.subject_to(X[:, N] == x_goal)
+
+# system dynamics constraints at each time step
+for k in range(N):
+    x_next = f(X[:, k], U[:, k], dt)
+    opti.subject_to(X[:, k + 1] == x_next)
 
 
