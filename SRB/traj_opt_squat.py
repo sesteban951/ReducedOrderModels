@@ -7,6 +7,7 @@
 # standard imports
 import numpy as np
 import matplotlib.pyplot as plt
+import os
 
 # casadi import
 import casadi as ca
@@ -440,6 +441,9 @@ time = np.linspace(0, T, N+1)
 # save the solution as csv
 X_sol_T = X_sol.T
 U_sol_T = U_sol.T
+save_dir = "./SRB/results/"
+if not os.path.exists(save_dir):
+    os.makedirs(save_dir)
 time_file =  "./SRB/results/time.csv"
 state_file = "./SRB/results/states.csv"
 input_file = "./SRB/results/inputs.csv"

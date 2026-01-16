@@ -16,7 +16,7 @@ w = X(:,11:13); % angular velocity
 K = size(T,1);
 
 % plotting mode
-mode = 2; % 1: animation, 2: plots
+mode = 1; % 1: animation, 2: plots
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
