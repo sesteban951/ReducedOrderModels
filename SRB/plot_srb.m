@@ -15,17 +15,16 @@ v = X(:,8:10);  % center of mass vel
 w = X(:,11:13); % angular velocity
 K = size(T,1);
 
-% plot the states
-figure;
-hold on;
-
 % plotting mode
-mode = 1; % 1: animation, 2: plots
+mode = 2; % 1: animation, 2: plots
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % animation
 if mode == 1
+
+    figure;
+    hold on;
 
     % mesh to use
     mesh = "./meshes/legoman.stl";
@@ -71,6 +70,9 @@ end
 
 % state and input plots
 if mode == 2
+
+    figure;
+    hold on;
 
     % Position
     subplot(4,4,1);
@@ -143,6 +145,56 @@ if mode == 2
     plot(T, w(:,3), 'b', 'DisplayName', 'w_z');
     xlabel('Time (s)');
     ylabel('Ang Vel Z');
+    grid on;
+
+
+    figure;
+    hold on;
+
+    % input forces
+    subplot(3,2,1);
+    hold on;
+    plot(T(1:end-1), U(:,1), 'r', 'DisplayName', 'F_left_x');
+    plot(T(1:end-1), U(:,4), 'r', 'DisplayName', 'F_right_x');
+    xlabel('Time (s)');
+    ylabel('F_x (N)');
+    grid on;
+    subplot(3,2,3);
+    hold on;
+    plot(T(1:end-1), U(:,2), 'g', 'DisplayName', 'F_left_y');
+    plot(T(1:end-1), U(:,5), 'g', 'DisplayName', 'F_right_y');
+    xlabel('Time (s)');
+    ylabel('F_y (N)');
+    grid on;
+    subplot(3,2,5);
+    hold on;
+    plot(T(1:end-1), U(:,3), 'b', 'DisplayName', 'F_left_z');
+    plot(T(1:end-1), U(:,6), 'b', 'DisplayName', 'F_right_z');
+    xlabel('Time (s)');
+    ylabel('F_z (N)');
+    grid on;
+
+    % input moments
+    subplot(3,2,2);
+    hold on;
+    plot(T(1:end-1), U(:,7), 'r', 'DisplayName', 'M_left_x');
+    plot(T(1:end-1), U(:,10), 'r', 'DisplayName', 'M_right_x');
+    xlabel('Time (s)');
+    ylabel('M_x (N.m)');
+    grid on;
+    subplot(3,2,4);
+    hold on;
+    plot(T(1:end-1), U(:,8), 'g', 'DisplayName', 'M_left_y');
+    plot(T(1:end-1), U(:,11), 'g', 'DisplayName', 'M_right_y');
+    xlabel('Time (s)');
+    ylabel('M_y (N.m)');
+    grid on;
+    subplot(3,2,6);
+    hold on;
+    plot(T(1:end-1), U(:,9), 'b', 'DisplayName', 'M_left_z');
+    plot(T(1:end-1), U(:,12), 'b', 'DisplayName', 'M_right_z');
+    xlabel('Time (s)');
+    ylabel('M_z (N.m)');
     grid on;
 
 end

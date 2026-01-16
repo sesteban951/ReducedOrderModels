@@ -45,8 +45,8 @@ class SRBDynamics:
         ))
 
         # penalize forces and positions
-        w_force = 0.001
-        w_moment = 0.001
+        w_force = 0.01
+        w_moment = 0.01
         self.Qu = ca.diag(ca.vertcat(
             w_force, w_force, w_force,    # F_left
             w_force, w_force, w_force,    # F_right
@@ -55,7 +55,7 @@ class SRBDynamics:
         ))
 
         # terminal weights (usually larger than running)
-        self.Qx_f = 50.0 * self.Qx
+        self.Qx_f = 500.0 * self.Qx
 
     # SRB model continuous dynamics
     # https://arxiv.org/pdf/2207.04163
@@ -386,14 +386,15 @@ z_min = 0.2
 for k in range(N+1):
     opti.subject_to(X[2, k] >= z_min)  # z com min height
 
-# input constraints
+# force limits
 mu = 1.0
 A, b = srb._friction_cone_matrix(mu)
 for k in range(N):
     opti.subject_to(A @ U[IDX_FL, k] <= b)
     opti.subject_to(A @ U[IDX_FR, k] <= b)
 
-m_max = 500.0  # start conservative; tune
+# moment limits
+m_max = 500.0  
 for k in range(N):
     opti.subject_to(opti.bounded(-m_max, U[IDX_ML, k], m_max))
     opti.subject_to(opti.bounded(-m_max, U[IDX_MR, k], m_max))
