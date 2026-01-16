@@ -34,9 +34,9 @@ class SRBDynamics:
 
         # simple quadratic 
         w_pos = 10.0
-        w_ori = 5.0
-        w_vel = 1.0
-        w_omega = 1.0
+        w_ori = 8.0
+        w_vel = 2.0
+        w_omega = 2.0
         self.Qx = ca.diag(ca.vertcat(
             w_pos, w_pos, w_pos,        # p_com
             w_ori, w_ori, w_ori,        # quat vector part
@@ -55,7 +55,7 @@ class SRBDynamics:
         ))
 
         # terminal weights (usually larger than running)
-        self.Qx_f = 10.0 * self.Qx
+        self.Qx_f = 50.0 * self.Qx
 
     # SRB model continuous dynamics
     # https://arxiv.org/pdf/2207.04163
@@ -346,7 +346,7 @@ nu = srb.nu
 
 # optimization settings
 dt = 0.04        # time step
-T = 5.0          # total time
+T = 4.0          # total time
 N = int(T / dt)  # number of intervals
 
 # ----------------------------------------------------------
@@ -361,13 +361,13 @@ X = opti.variable(nx, N + 1)  # states over the horizon
 U = opti.variable(nu, N)      # inputs over the horizon
 
 # initial condition
-x0 = np.array([0.01, 0, 1,  # p_com
+x0 = np.array([0, 0, 1,    # p_com
                1, 0, 0, 0, # quaternion
                0, 0, 0,    # v_com
                0, 0, 0])   # w_body
 
 # desired goal state
-pitch_goal = np.deg2rad(80) 
+pitch_goal = np.deg2rad(89) 
 x_goal = np.array([0.0, 0, 0.5, # p_com
                    np.cos(pitch_goal/2), 0, np.sin(pitch_goal/2), 0, # quaternion
                    0, 0, 0,     # v_com
@@ -429,13 +429,23 @@ sol = opti.solve()
 X_sol = sol.value(X)
 U_sol = sol.value(U)
 
+# ----------------------------------------------------------
+# Save
+# ----------------------------------------------------------
+
+# create the time array
+time = np.linspace(0, T, N+1)
+
 # save the solution as csv
 X_sol_T = X_sol.T
 U_sol_T = U_sol.T
+time_file =  "./SRB/results/time.csv"
 state_file = "./SRB/results/states.csv"
 input_file = "./SRB/results/inputs.csv"
+np.savetxt(time_file, time, delimiter=",")
 np.savetxt(state_file, X_sol_T, delimiter=",")
 np.savetxt(input_file, U_sol_T, delimiter=",")
+print(f"Saved time to {time_file}")
 print(f"Saved states to {state_file}")
 print(f"Saved inputs to {input_file}")
 
@@ -443,51 +453,68 @@ print(f"Saved inputs to {input_file}")
 # Plot
 # ----------------------------------------------------------
 
-# convert the final orientation to euler angles for visualization
-euler_sol = np.zeros((3, N+1))
-for k in range(N+1):
-    quat_k = X_sol[IDX_Q, k]
-    R = srb._quat_to_rotmat(quat_k)
-    y, p, r = srb._rotmat_to_euler_ZYX(R)
-    euler_sol[:, k] = np.array([y, p, r]).reshape(-1)
+# # convert the final orientation to euler angles for visualization
+# euler_sol = np.zeros((3, N+1))
+# for k in range(N+1):
+#     quat_k = X_sol[IDX_Q, k]
+#     R = srb._quat_to_rotmat(quat_k)
+#     y, p, r = srb._rotmat_to_euler_ZYX(R)
+#     euler_sol[:, k] = np.array([y, p, r]).reshape(-1)
 
-# plot some results
-plt.figure()
-plt.subplot(3,1,1)
-plt.plot(X_sol[0, :], label='x')
-plt.plot(X_sol[1, :], label='y')
-plt.plot(X_sol[2, :], label='z')
-plt.title('CoM Position')
-plt.legend()
+# # plot some results
+# plt.figure()
 
-plt.subplot(3,1,2)
-plt.plot(X_sol[7, :], label='vx')
-plt.plot(X_sol[8, :], label='vy')
-plt.plot(X_sol[9, :], label='vz')
-plt.title('CoM Velocity')
-plt.legend()
+# plt.subplot(3,1,1)
+# plt.plot(X_sol[0, :], label='x')
+# plt.plot(X_sol[1, :], label='y')
+# plt.plot(X_sol[2, :], label='z')
+# plt.title('CoM Position')
+# plt.legend()
 
-plt.subplot(3,1,3)
-plt.plot(euler_sol[0, :], label='yaw')
-plt.plot(euler_sol[1, :], label='pitch')
-plt.plot(euler_sol[2, :], label='roll')
-plt.title('Orientation (Euler ZYX)')
-plt.legend()
+# plt.subplot(3,1,2)
+# plt.plot(X_sol[7, :], label='vx')
+# plt.plot(X_sol[8, :], label='vy')
+# plt.plot(X_sol[9, :], label='vz')
+# plt.title('CoM Velocity')
+# plt.legend()
 
-plt.show()
+# plt.subplot(3,1,3)
+# plt.plot(euler_sol[0, :], label='yaw')
+# plt.plot(euler_sol[1, :], label='pitch')
+# plt.plot(euler_sol[2, :], label='roll')
+# plt.title('Orientation (Euler ZYX)')
+# plt.legend()
 
-# plto forces
-plt.figure()
-plt.subplot(3,1,1)
-plt.plot(U_sol[0, :], label='F_left_x')
-plt.plot(U_sol[1, :], label='F_left_y')
-plt.plot(U_sol[2, :], label='F_left_z')
-plt.title('Left Foot Forces')
-plt.legend()    
-plt.subplot(3,1,2)
-plt.plot(U_sol[3, :], label='F_right_x')
-plt.plot(U_sol[4, :], label='F_right_y')
-plt.plot(U_sol[5, :], label='F_right_z')
-plt.title('Right Foot Forces')
-plt.legend()    
-plt.show()
+# plt.show()
+
+# # plto forces
+# plt.figure()
+
+# plt.subplot(4,1,1)
+# plt.plot(U_sol[0, :], label='F_left_x')
+# plt.plot(U_sol[1, :], label='F_left_y')
+# plt.plot(U_sol[2, :], label='F_left_z')
+# plt.title('Left Foot Forces')
+# plt.legend()    
+# plt.subplot(4,1,2)
+# plt.plot(U_sol[3, :], label='F_right_x')
+# plt.plot(U_sol[4, :], label='F_right_y')
+# plt.plot(U_sol[5, :], label='F_right_z')
+# plt.title('Right Foot Forces')
+# plt.legend()
+
+# plt.subplot(4,1,3)
+# plt.plot(U_sol[6, :], label='M_left_torque_x')
+# plt.plot(U_sol[7, :], label='M_left_torque_y')
+# plt.plot(U_sol[8, :], label='M_left_torque_z')
+# plt.title('Left Foot Torques')
+# plt.legend()
+
+# plt.subplot(4,1,4)
+# plt.plot(U_sol[9, :], label='M_right_torque_x')
+# plt.plot(U_sol[10, :], label='M_right_torque_y')
+# plt.plot(U_sol[11, :], label='M_right_torque_z')
+# plt.title('Right Foot Torques')
+# plt.legend()
+
+# plt.show()
