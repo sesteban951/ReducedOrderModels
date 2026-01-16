@@ -58,6 +58,10 @@ class SRBDynamics:
         # terminal weights (usually larger than running)
         self.Qx_f = 500.0 * self.Qx
 
+    ###############################################################
+    # Dynamics
+    ###############################################################
+
     # SRB model continuous dynamics
     # https://arxiv.org/pdf/2207.04163
     def f_cont(self, x, u):
@@ -133,6 +137,10 @@ class SRBDynamics:
         )
         
         return x_next
+    
+    ###############################################################
+    # Helper Functions
+    ###############################################################
 
     # quaternion to rotation matrix
     def _quat_to_rotmat(self, q):
@@ -234,6 +242,10 @@ class SRBDynamics:
         b = ca.DM.zeros(5, 1)
 
         return A, b
+    
+    ###############################################################
+    # Cost Functions
+    ###############################################################
 
     # running cost
     def running_cost(self, x, u, x_goal):

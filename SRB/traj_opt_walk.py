@@ -29,9 +29,10 @@ class SRBDynamics:
         self.nu = 12   # [F_left, F_right, M_left, M_right]
 
         # system parameters
-        self.m = 35.0                                # mass [kg]
+        self.m = 35.0                                # G1 mass [kg]
         self.g = 9.81                                # gravity [m/s^2]
         self.I = ca.diag(ca.DM([0.50, 0.50, 0.25]))  # body frame inertia matrix [kg*m^2]
+        self.hip_offset = 0.1185                     # G1 hip offset from Base [m]
 
         # simple quadratic 
         w_pos = 10.0
@@ -58,9 +59,13 @@ class SRBDynamics:
         # terminal weights (usually larger than running)
         self.Qx_f = 500.0 * self.Qx
 
+    ###############################################################
+    # Dynamics
+    ###############################################################
+
     # SRB model continuous dynamics
     # https://arxiv.org/pdf/2207.04163
-    def f_cont(self, x, u):
+    def f_cont(self, x, u, p_left_W, p_right_W):
         
         # extract the state
         p_com =  x[0:3]    # position in world frame
@@ -80,13 +85,9 @@ class SRBDynamics:
         # net force in the world frame
         F_net_W = F_left + F_right + ca.DM([0, 0, -self.m * self.g])
 
-        # choose a a random point on the ground for each foot
-        p_left = ca.DM([0.0,   0.1, 0.0])   # left foot position in world frame
-        p_right = ca.DM([0.0, -0.1, 0.0])  # right foot position in world frame
-
         # net moment about COM
-        M_net_W = (ca.cross(p_left - p_com, F_left) 
-                 + ca.cross(p_right - p_com, F_right)
+        M_net_W = (ca.cross(p_left_W - p_com, F_left) 
+                 + ca.cross(p_right_W - p_com, F_right)
                  + M_left + M_right)
         M_net_B = R_BW.T @ M_net_W  # express moment in body frame
 
@@ -112,10 +113,10 @@ class SRBDynamics:
         return x_dot
     
     # SRB model discrete dynamics using Euler integration
-    def f_disc(self, x, u, dt):
+    def f_disc(self, x, u, dt, p_left_W, p_right_W):
         
         # get the continuous dynamics vector
-        x_dot = self.f_cont(x, u)
+        x_dot = self.f_cont(x, u, p_left_W, p_right_W)
 
         # Euler integration
         x_next = x + dt * x_dot
@@ -133,6 +134,10 @@ class SRBDynamics:
         )
         
         return x_next
+    
+    ###############################################################
+    # Helper Functions
+    ###############################################################
 
     # quaternion to rotation matrix
     def _quat_to_rotmat(self, q):
@@ -234,6 +239,74 @@ class SRBDynamics:
         b = ca.DM.zeros(5, 1)
 
         return A, b
+    
+    # build a contact schedule
+    def contact_schedule(self, dt, N, T_SSP, init_stance="L"):
+
+        # compute the number of nodes per single support phase
+        N_node_SSP = int(round(T_SSP / dt))
+        N_node_SSP = max(N_node_SSP, 1)  # at least 1 step
+
+        # storage for the contact schedule
+        contact_L = np.zeros(N, dtype=int)
+        contact_R = np.zeros(N, dtype=int)
+        phase_idx = np.zeros(N, dtype=int)
+
+        # initialize the stance
+        stance = init_stance.upper()
+        assert stance in ["L", "R"], "init_stance must be 'L' or 'R'"
+
+        # loop through trajectory length
+        for k in range(N):
+
+            # phase number
+            phase = k // N_node_SSP
+            phase_idx[k] = phase
+
+            if stance == "L":
+                contact_L[k] = 1
+            else:
+                contact_R[k] = 1
+
+            # flip at the start of each new phase
+            if (k+1) % N_node_SSP == 0:
+                stance = "R" if stance == "L" else "L"
+
+        return contact_L, contact_R, phase_idx, N_node_SSP
+
+    # get the actual contact state
+    def get_contact_state(self, t, T_SSP, init_stance="L"):
+
+        # clamp negative time
+        if t < 0:
+            t = 0.0
+
+        # compute the phase
+        phase = int(np.floor(t / T_SSP))
+
+        # determine which foot is in stance
+        left_stance = (init_stance.upper() == "L")
+        if phase % 2 == 1:
+            left_stance = not left_stance
+
+        # build contact state
+        cL = 1 if left_stance else 0
+        cR = 0 if left_stance else 1
+
+        return cL, cR, phase
+
+    # get foot positions at phase k
+    def pL_W_at(self, k):
+        s = int(phase_idx[k])
+        return ca.vertcat(P_L_xy[:, s], 0.0)
+
+    def pR_W_at(self, k):
+        s = int(phase_idx[k])
+        return ca.vertcat(P_R_xy[:, s], 0.0)
+    
+    ###############################################################
+    # Cost Functions
+    ###############################################################
 
     # running cost
     def running_cost(self, x, u, x_goal):
@@ -347,8 +420,14 @@ nu = srb.nu
 
 # optimization settings
 dt = 0.04        # time step
-T = 4.0          # total time
+T = 4.2          # total time
 N = int(T / dt)  # number of intervals
+
+# create the contact schedule
+T_SSP = 0.4
+schedule = srb.contact_schedule(dt, N, T_SSP, init_stance="L")
+contact_L, contact_R, phase_idx, N_node_SSP = schedule
+S = int(phase_idx[-1] + 1)  # number of SSP phases actually used
 
 # ----------------------------------------------------------
 # Setup the optimization problem
@@ -360,6 +439,8 @@ opti = ca.Opti()
 # horizon variables
 X = opti.variable(nx, N + 1)  # states over the horizon
 U = opti.variable(nu, N)      # inputs over the horizon
+P_L_xy = opti.variable(2, S)  # left foot (x,y) for each SSP phase
+P_R_xy = opti.variable(2, S)  # right foot (x,y) for each SSP phase
 
 # initial condition
 x0 = np.array([0, 0, 1,    # p_com
@@ -379,8 +460,25 @@ opti.subject_to(X[:, 0] == x0)
 
 # system dynamics constraints at each time step
 for k in range(N):
-    x_next = f(X[:, k], U[:, k], dt)
+    x_next = srb.f_disc(X[:, k], U[:, k], dt, srb.pL_W_at(k), srb.pR_W_at(k))
     opti.subject_to(X[:, k + 1] == x_next)
+
+# foot position constraints across phase boundaries
+for s in range(1, S):
+
+    k0 = s * N_node_SSP
+
+    if k0 >= N:
+        break
+
+    if contact_L[k0] == 1:
+        # left is stance in phase s -> left cannot change across boundary
+        opti.subject_to(P_L_xy[:, s] == P_L_xy[:, s-1])
+        # right is swing -> allowed to change
+    else:
+        # right is stance in phase s
+        opti.subject_to(P_R_xy[:, s] == P_R_xy[:, s-1])
+        # left is swing -> allowed to change
 
 # state constraints
 z_min = 0.2
@@ -388,17 +486,25 @@ for k in range(N+1):
     opti.subject_to(X[2, k] >= z_min)  # z com min height
 
 # force limits
+m_max = 500.0  
 mu = 1.0
 A, b = srb._friction_cone_matrix(mu)
 for k in range(N):
-    opti.subject_to(A @ U[IDX_FL, k] <= b)
-    opti.subject_to(A @ U[IDX_FR, k] <= b)
+    # opti.subject_to(A @ U[IDX_FL, k] <= b)
+    # opti.subject_to(A @ U[IDX_FR, k] <= b)
+    if contact_L[k] == 1:
+        opti.subject_to(A @ U[IDX_FL, k] <= b)
+        opti.subject_to(opti.bounded(-m_max, U[IDX_ML, k], m_max))
+    else:
+        opti.subject_to(U[IDX_FL, k] == 0)
+        opti.subject_to(U[IDX_ML, k] == 0)
 
-# moment limits
-m_max = 500.0  
-for k in range(N):
-    opti.subject_to(opti.bounded(-m_max, U[IDX_ML, k], m_max))
-    opti.subject_to(opti.bounded(-m_max, U[IDX_MR, k], m_max))
+    if contact_R[k] == 1:
+        opti.subject_to(A @ U[IDX_FR, k] <= b)
+        opti.subject_to(opti.bounded(-m_max, U[IDX_MR, k], m_max))
+    else:
+        opti.subject_to(U[IDX_FR, k] == 0)
+        opti.subject_to(U[IDX_MR, k] == 0)
 
 # objective function 
 J = 0
@@ -419,6 +525,9 @@ opti.set_initial(U, 0)
 opti.set_initial(U[2, :], 0.5 * srb.m * srb.g)  # fLz
 opti.set_initial(U[5, :], 0.5 * srb.m * srb.g)  # fRz
 
+opti.set_initial(P_L_xy, np.tile(np.array([[0.0],[ srb.hip_offset]]), (1, S)))
+opti.set_initial(P_R_xy, np.tile(np.array([[0.0],[-srb.hip_offset]]), (1, S)))
+
 # ----------------------------------------------------------
 # Solve the optimization
 # ----------------------------------------------------------
@@ -431,28 +540,30 @@ sol = opti.solve()
 X_sol = sol.value(X)
 U_sol = sol.value(U)
 
+
+
 # ----------------------------------------------------------
 # Save
 # ----------------------------------------------------------
 
-# create the time array
-time = np.linspace(0, T, N+1)
+# # create the time array
+# time = np.linspace(0, T, N+1)
 
-# save the solution as csv
-X_sol_T = X_sol.T
-U_sol_T = U_sol.T
-save_dir = "./SRB/results/"
-if not os.path.exists(save_dir):
-    os.makedirs(save_dir)
-time_file =  "./SRB/results/time.csv"
-state_file = "./SRB/results/states.csv"
-input_file = "./SRB/results/inputs.csv"
-np.savetxt(time_file, time, delimiter=",")
-np.savetxt(state_file, X_sol_T, delimiter=",")
-np.savetxt(input_file, U_sol_T, delimiter=",")
-print(f"Saved time to {time_file}")
-print(f"Saved states to {state_file}")
-print(f"Saved inputs to {input_file}")
+# # save the solution as csv
+# X_sol_T = X_sol.T
+# U_sol_T = U_sol.T
+# save_dir = "./SRB/results/"
+# if not os.path.exists(save_dir):
+#     os.makedirs(save_dir)
+# time_file =  "./SRB/results/time.csv"
+# state_file = "./SRB/results/states.csv"
+# input_file = "./SRB/results/inputs.csv"
+# np.savetxt(time_file, time, delimiter=",")
+# np.savetxt(state_file, X_sol_T, delimiter=",")
+# np.savetxt(input_file, U_sol_T, delimiter=",")
+# print(f"Saved time to {time_file}")
+# print(f"Saved states to {state_file}")
+# print(f"Saved inputs to {input_file}")
 
 # ----------------------------------------------------------
 # Plot
