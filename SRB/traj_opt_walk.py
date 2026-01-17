@@ -296,14 +296,24 @@ class SRBDynamics:
         return cL, cR, phase
 
     # get foot positions at phase k
-    def pL_W_at(self, k):
-        s = int(phase_idx[k])
-        return ca.vertcat(P_L_xy[:, s], 0.0)
+    def p_left_W_at(self, k, phase_idx):
+        # get which current step we are in
+        curr_step = int(phase_idx[k])
 
-    def pR_W_at(self, k):
-        s = int(phase_idx[k])
-        return ca.vertcat(P_R_xy[:, s], 0.0)
-    
+        # return the foot position
+        p_left_W_k = ca.vertcat(P_L_xy[:, curr_step], 0.0)
+
+        return p_left_W_k
+
+    def p_right_W_at(self, k, phase_idx):
+        # get which current step we are in
+        curr_step = int(phase_idx[k])
+
+        # return the foot position
+        p_right_W_k = ca.vertcat(P_R_xy[:, curr_step], 0.0)
+
+        return p_right_W_k
+
     ###############################################################
     # Cost Functions
     ###############################################################
@@ -419,15 +429,15 @@ nx = nq + nv
 nu = srb.nu
 
 # optimization settings
-dt = 0.04        # time step
-T = 4.2          # total time
+dt = 0.025       # time step
+T = 5.0          # total time
 N = int(T / dt)  # number of intervals
 
 # create the contact schedule
 T_SSP = 0.4
 schedule = srb.contact_schedule(dt, N, T_SSP, init_stance="L")
 contact_L, contact_R, phase_idx, N_node_SSP = schedule
-S = int(phase_idx[-1] + 1)  # number of SSP phases actually used
+N_steps = int(phase_idx[-1] + 1)  # number of SSP phases actually used
 
 # ----------------------------------------------------------
 # Setup the optimization problem
@@ -437,10 +447,10 @@ S = int(phase_idx[-1] + 1)  # number of SSP phases actually used
 opti = ca.Opti()
 
 # horizon variables
-X = opti.variable(nx, N + 1)  # states over the horizon
-U = opti.variable(nu, N)      # inputs over the horizon
-P_L_xy = opti.variable(2, S)  # left foot (x,y) for each SSP phase
-P_R_xy = opti.variable(2, S)  # right foot (x,y) for each SSP phase
+X = opti.variable(nx, N + 1)        # states over the horizon
+U = opti.variable(nu, N)            # inputs over the horizon
+P_L_xy = opti.variable(2, N_steps)  # left foot (x,y) for each SSP phase
+P_R_xy = opti.variable(2, N_steps)  # right foot (x,y) for each SSP phase
 
 # initial condition
 x0 = np.array([0, 0, 1,    # p_com
@@ -449,9 +459,8 @@ x0 = np.array([0, 0, 1,    # p_com
                0, 0, 0])   # w_body
 
 # desired goal state
-pitch_goal = np.deg2rad(89) 
-x_goal = np.array([0.0, 0, 0.5, # p_com
-                   np.cos(pitch_goal/2), 0, np.sin(pitch_goal/2), 0, # quaternion
+x_goal = np.array([1.0, 1.0, 1,  # p_com
+                   1, 0, 0, 0,  # quaternion
                    0, 0, 0,     # v_com
                    0, 0, 0])    # w_body
 
@@ -460,11 +469,11 @@ opti.subject_to(X[:, 0] == x0)
 
 # system dynamics constraints at each time step
 for k in range(N):
-    x_next = srb.f_disc(X[:, k], U[:, k], dt, srb.pL_W_at(k), srb.pR_W_at(k))
+    x_next = srb.f_disc(X[:, k], U[:, k], dt, srb.p_left_W_at(k, phase_idx), srb.p_right_W_at(k, phase_idx))
     opti.subject_to(X[:, k + 1] == x_next)
 
 # foot position constraints across phase boundaries
-for s in range(1, S):
+for s in range(1, N_steps):
 
     k0 = s * N_node_SSP
 
@@ -490,8 +499,6 @@ m_max = 500.0
 mu = 1.0
 A, b = srb._friction_cone_matrix(mu)
 for k in range(N):
-    # opti.subject_to(A @ U[IDX_FL, k] <= b)
-    # opti.subject_to(A @ U[IDX_FR, k] <= b)
     if contact_L[k] == 1:
         opti.subject_to(A @ U[IDX_FL, k] <= b)
         opti.subject_to(opti.bounded(-m_max, U[IDX_ML, k], m_max))
@@ -525,8 +532,8 @@ opti.set_initial(U, 0)
 opti.set_initial(U[2, :], 0.5 * srb.m * srb.g)  # fLz
 opti.set_initial(U[5, :], 0.5 * srb.m * srb.g)  # fRz
 
-opti.set_initial(P_L_xy, np.tile(np.array([[0.0],[ srb.hip_offset]]), (1, S)))
-opti.set_initial(P_R_xy, np.tile(np.array([[0.0],[-srb.hip_offset]]), (1, S)))
+opti.set_initial(P_L_xy, np.tile(np.array([[0.0],[ srb.hip_offset]]), (1, N_steps)))
+opti.set_initial(P_R_xy, np.tile(np.array([[0.0],[-srb.hip_offset]]), (1, N_steps)))
 
 # ----------------------------------------------------------
 # Solve the optimization
@@ -539,98 +546,75 @@ opti.solver(
 sol = opti.solve()
 X_sol = sol.value(X)
 U_sol = sol.value(U)
-
-
+P_L_xy_sol = sol.value(P_L_xy)
+P_R_xy_sol = sol.value(P_R_xy)
 
 # ----------------------------------------------------------
 # Save
 # ----------------------------------------------------------
 
-# # create the time array
-# time = np.linspace(0, T, N+1)
+# create the time array
+time = np.linspace(0, T, N+1)
 
-# # save the solution as csv
-# X_sol_T = X_sol.T
-# U_sol_T = U_sol.T
-# save_dir = "./SRB/results/"
-# if not os.path.exists(save_dir):
-#     os.makedirs(save_dir)
-# time_file =  "./SRB/results/time.csv"
-# state_file = "./SRB/results/states.csv"
-# input_file = "./SRB/results/inputs.csv"
-# np.savetxt(time_file, time, delimiter=",")
-# np.savetxt(state_file, X_sol_T, delimiter=",")
-# np.savetxt(input_file, U_sol_T, delimiter=",")
-# print(f"Saved time to {time_file}")
-# print(f"Saved states to {state_file}")
-# print(f"Saved inputs to {input_file}")
+BIG = 1e6
 
-# ----------------------------------------------------------
-# Plot
-# ----------------------------------------------------------
+P_L_W = BIG * np.ones((3, N + 1))
+P_R_W = BIG * np.ones((3, N + 1))
+P_support_W = BIG * np.ones((3, N + 1))
 
-# # convert the final orientation to euler angles for visualization
-# euler_sol = np.zeros((3, N+1))
-# for k in range(N+1):
-#     quat_k = X_sol[IDX_Q, k]
-#     R = srb._quat_to_rotmat(quat_k)
-#     y, p, r = srb._rotmat_to_euler_ZYX(R)
-#     euler_sol[:, k] = np.array([y, p, r]).reshape(-1)
+for k in range(N + 1):
+    # phase index: defined on intervals (0..N-1)
+    s = int(phase_idx[k]) if k < len(phase_idx) else int(phase_idx[-1])
 
-# # plot some results
-# plt.figure()
+    # contacts: also defined on intervals (0..N-1)
+    cL = int(contact_L[k]) if k < len(contact_L) else int(contact_L[-1])
+    cR = int(contact_R[k]) if k < len(contact_R) else int(contact_R[-1])
 
-# plt.subplot(3,1,1)
-# plt.plot(X_sol[0, :], label='x')
-# plt.plot(X_sol[1, :], label='y')
-# plt.plot(X_sol[2, :], label='z')
-# plt.title('CoM Position')
-# plt.legend()
+    pL_xy = P_L_xy_sol[:, s]
+    pR_xy = P_R_xy_sol[:, s]
 
-# plt.subplot(3,1,2)
-# plt.plot(X_sol[7, :], label='vx')
-# plt.plot(X_sol[8, :], label='vy')
-# plt.plot(X_sol[9, :], label='vz')
-# plt.title('CoM Velocity')
-# plt.legend()
+    if cL == 1:
+        P_L_W[:, k] = np.array([pL_xy[0], pL_xy[1], 0.0])
+        P_support_W[:, k] = P_L_W[:, k]
+    else:
+        P_L_W[:, k] = np.array([BIG, BIG, BIG])
 
-# plt.subplot(3,1,3)
-# plt.plot(euler_sol[0, :], label='yaw')
-# plt.plot(euler_sol[1, :], label='pitch')
-# plt.plot(euler_sol[2, :], label='roll')
-# plt.title('Orientation (Euler ZYX)')
-# plt.legend()
+    if cR == 1:
+        P_R_W[:, k] = np.array([pR_xy[0], pR_xy[1], 0.0])
+        if cL == 0:
+            P_support_W[:, k] = P_R_W[:, k]
+    else:
+        P_R_W[:, k] = np.array([BIG, BIG, BIG])
 
-# plt.show()
+# (N+1,3) for saving/plotting
+P_L_W_T = P_L_W.T
+P_R_W_T = P_R_W.T
+P_sup_T = P_support_W.T
 
-# # plto forces
-# plt.figure()
 
-# plt.subplot(4,1,1)
-# plt.plot(U_sol[0, :], label='F_left_x')
-# plt.plot(U_sol[1, :], label='F_left_y')
-# plt.plot(U_sol[2, :], label='F_left_z')
-# plt.title('Left Foot Forces')
-# plt.legend()    
-# plt.subplot(4,1,2)
-# plt.plot(U_sol[3, :], label='F_right_x')
-# plt.plot(U_sol[4, :], label='F_right_y')
-# plt.plot(U_sol[5, :], label='F_right_z')
-# plt.title('Right Foot Forces')
-# plt.legend()
-
-# plt.subplot(4,1,3)
-# plt.plot(U_sol[6, :], label='M_left_torque_x')
-# plt.plot(U_sol[7, :], label='M_left_torque_y')
-# plt.plot(U_sol[8, :], label='M_left_torque_z')
-# plt.title('Left Foot Torques')
-# plt.legend()
-
-# plt.subplot(4,1,4)
-# plt.plot(U_sol[9, :], label='M_right_torque_x')
-# plt.plot(U_sol[10, :], label='M_right_torque_y')
-# plt.plot(U_sol[11, :], label='M_right_torque_z')
-# plt.title('Right Foot Torques')
-# plt.legend()
-
-# plt.show()
+# save the solution as csv
+X_sol_T = X_sol.T
+U_sol_T = U_sol.T
+P_L_xy_sol_T = P_L_xy_sol.T
+P_R_xy_sol_T = P_R_xy_sol.T
+save_dir = "./SRB/results/walk/"
+if not os.path.exists(save_dir):
+    os.makedirs(save_dir)
+time_file =  "./SRB/results/walk/time.csv"
+state_file = "./SRB/results/walk/states.csv"
+input_file = "./SRB/results/walk/inputs.csv"
+p_left_file = "./SRB/results/walk/p_left.csv"
+p_right_file = "./SRB/results/walk/p_right.csv"
+p_sup_file = "./SRB/results/walk/p_support.csv"
+np.savetxt(time_file, time, delimiter=",")
+np.savetxt(state_file, X_sol_T, delimiter=",")
+np.savetxt(input_file, U_sol_T, delimiter=",")
+np.savetxt(p_left_file, P_L_W_T, delimiter=",")
+np.savetxt(p_right_file, P_R_W_T, delimiter=",")
+np.savetxt(p_sup_file, P_sup_T, delimiter=",")
+print(f"Saved time to {time_file}")
+print(f"Saved states to {state_file}")
+print(f"Saved inputs to {input_file}")
+print(f"Saved left foot positions to {p_left_file}")
+print(f"Saved right foot positions to {p_right_file}")
+print(f"Saved support foot positions to {p_sup_file}")

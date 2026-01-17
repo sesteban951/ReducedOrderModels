@@ -6,7 +6,6 @@
 
 # standard imports
 import numpy as np
-import matplotlib.pyplot as plt
 import os
 
 # casadi import
@@ -380,7 +379,7 @@ x0 = np.array([0, 0, 1,    # p_com
                0, 0, 0])   # w_body
 
 # desired goal state
-pitch_goal = np.deg2rad(89) 
+pitch_goal = np.deg2rad(-270) 
 x_goal = np.array([0.0, 0, 0.5, # p_com
                    np.cos(pitch_goal/2), 0, np.sin(pitch_goal/2), 0, # quaternion
                    0, 0, 0,     # v_com
@@ -417,13 +416,14 @@ J = 0
 for k in range(N):
     J += srb.running_cost(X[:, k], U[:, k], x_goal)
 
-# either terminal cost or final state constraint
+# either terminal cost or final state constraint, not both
 # J += srb.terminal_cost(X[:, N], x_goal)
 opti.subject_to(X[:, N] == x_goal)
 
 # set the objective
 opti.minimize(J)
 
+# initial guesses
 opti.set_initial(X, np.tile(x0.reshape(-1, 1), (1, N+1)))
 opti.set_initial(U, 0)
 
@@ -453,85 +453,15 @@ time = np.linspace(0, T, N+1)
 # save the solution as csv
 X_sol_T = X_sol.T
 U_sol_T = U_sol.T
-save_dir = "./SRB/results/"
+save_dir = "./SRB/results/squat/"
 if not os.path.exists(save_dir):
     os.makedirs(save_dir)
-time_file =  "./SRB/results/time.csv"
-state_file = "./SRB/results/states.csv"
-input_file = "./SRB/results/inputs.csv"
+time_file =  "./SRB/results/squat/time.csv"
+state_file = "./SRB/results/squat/states.csv"
+input_file = "./SRB/results/squat/inputs.csv"
 np.savetxt(time_file, time, delimiter=",")
 np.savetxt(state_file, X_sol_T, delimiter=",")
 np.savetxt(input_file, U_sol_T, delimiter=",")
 print(f"Saved time to {time_file}")
 print(f"Saved states to {state_file}")
 print(f"Saved inputs to {input_file}")
-
-# ----------------------------------------------------------
-# Plot
-# ----------------------------------------------------------
-
-# # convert the final orientation to euler angles for visualization
-# euler_sol = np.zeros((3, N+1))
-# for k in range(N+1):
-#     quat_k = X_sol[IDX_Q, k]
-#     R = srb._quat_to_rotmat(quat_k)
-#     y, p, r = srb._rotmat_to_euler_ZYX(R)
-#     euler_sol[:, k] = np.array([y, p, r]).reshape(-1)
-
-# # plot some results
-# plt.figure()
-
-# plt.subplot(3,1,1)
-# plt.plot(X_sol[0, :], label='x')
-# plt.plot(X_sol[1, :], label='y')
-# plt.plot(X_sol[2, :], label='z')
-# plt.title('CoM Position')
-# plt.legend()
-
-# plt.subplot(3,1,2)
-# plt.plot(X_sol[7, :], label='vx')
-# plt.plot(X_sol[8, :], label='vy')
-# plt.plot(X_sol[9, :], label='vz')
-# plt.title('CoM Velocity')
-# plt.legend()
-
-# plt.subplot(3,1,3)
-# plt.plot(euler_sol[0, :], label='yaw')
-# plt.plot(euler_sol[1, :], label='pitch')
-# plt.plot(euler_sol[2, :], label='roll')
-# plt.title('Orientation (Euler ZYX)')
-# plt.legend()
-
-# plt.show()
-
-# # plto forces
-# plt.figure()
-
-# plt.subplot(4,1,1)
-# plt.plot(U_sol[0, :], label='F_left_x')
-# plt.plot(U_sol[1, :], label='F_left_y')
-# plt.plot(U_sol[2, :], label='F_left_z')
-# plt.title('Left Foot Forces')
-# plt.legend()    
-# plt.subplot(4,1,2)
-# plt.plot(U_sol[3, :], label='F_right_x')
-# plt.plot(U_sol[4, :], label='F_right_y')
-# plt.plot(U_sol[5, :], label='F_right_z')
-# plt.title('Right Foot Forces')
-# plt.legend()
-
-# plt.subplot(4,1,3)
-# plt.plot(U_sol[6, :], label='M_left_torque_x')
-# plt.plot(U_sol[7, :], label='M_left_torque_y')
-# plt.plot(U_sol[8, :], label='M_left_torque_z')
-# plt.title('Left Foot Torques')
-# plt.legend()
-
-# plt.subplot(4,1,4)
-# plt.plot(U_sol[9, :], label='M_right_torque_x')
-# plt.plot(U_sol[10, :], label='M_right_torque_y')
-# plt.plot(U_sol[11, :], label='M_right_torque_z')
-# plt.title('Right Foot Torques')
-# plt.legend()
-
-# plt.show()
